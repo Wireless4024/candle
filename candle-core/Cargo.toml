@@ -10,6 +10,8 @@ license.workspace = true
 readme = "README.md"
 
 [dependencies]
+ahash = { workspace = true }
+serde = { workspace = true }
 accelerate-src = { workspace = true, optional = true }
 byteorder = { workspace = true }
 candle-kernels = { workspace = true, optional = true }
@@ -60,3 +62,10 @@ required-features = ["metal"]
 [[example]]
 name = "cuda_basics"
 required-features = ["cuda"]
+
+[profile.dev]
+opt-level = 3
+debug = true
+debug-assertions = false
+overflow-checks = false
+inline-threshold = 9999

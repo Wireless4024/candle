@@ -10,6 +10,7 @@ license.workspace = true
 readme = "README.md"
 
 [dependencies]
+ahash = { workspace = true }
 accelerate-src = { workspace = true, optional = true }
 candle = { workspace = true }
 half = { workspace = true }

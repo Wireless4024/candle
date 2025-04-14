@@ -15,8 +15,22 @@ trait Cpu<const ARR: usize> {
     unsafe fn zero_array() -> Self::Array;
     unsafe fn load(mem_addr: *const f32) -> Self::Unit;
     unsafe fn vec_add(a: Self::Unit, b: Self::Unit) -> Self::Unit;
-    unsafe fn vec_fma(a: Self::Unit, b: Self::Unit, c: Self::Unit) -> Self::Unit;
+    #[inline(always)]
+    unsafe fn scala_fma(a: *const f32, b: *const f32, k: usize, c: *mut f32) {
+        assert_unchecked(k < Self::STEP);
+        for i in 0..k {
+            *c = (*a.add(i)).mul_add(*b.add(i), *c);
+        }
+    }
+    unsafe fn vec_fma(add: Self::Unit, mul_a: Self::Unit, mul_b: Self::Unit) -> Self::Unit;
     unsafe fn vec_reduce(x: Self::Array, y: *mut f32);
+    #[inline(always)]
+    unsafe fn scala_sum(a: *const f32, k: usize, c: *mut f32) {
+        assert_unchecked(k < Self::STEP);
+        for i in 0..k {
+            *c += *a.add(i);
+        }
+    }
     unsafe fn from_f32(v: f32) -> Self::Unit;
     unsafe fn vec_store(mem_addr: *mut f32, a: Self::Unit);
 }
@@ -38,14 +52,22 @@ trait CpuF16<const ARR: usize> {
     unsafe fn from_f32(v: f32) -> Self::Unit;
     unsafe fn vec_store(mem_addr: *mut f16, a: Self::Unit);
 }
+
+use std::hint::assert_unchecked;
 use half::f16;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg(target_feature = "avx")]
 pub mod avx;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[cfg(target_feature = "avx")]
+#[cfg(all(target_feature = "avx512f", target_feature = "avx512vl", target_feature = "avx512bw", target_feature = "avx512dq", target_feature = "avx512bf16"))]
+pub mod avx512;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(all(target_feature = "avx", not(all(target_feature = "avx512f", target_feature = "avx512vl", target_feature = "avx512bw", target_feature = "avx512dq", target_feature = "avx512bf16"))))]
 pub use avx::{CurrentCpu, CurrentCpuF16};
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(all(target_feature = "avx512f", target_feature = "avx512vl", target_feature = "avx512bw", target_feature = "avx512dq", target_feature = "avx512bf16"))]
+pub use {avx::CurrentCpuF16, avx512::CurrentCpu};
 
 #[cfg(target_arch = "wasm32")]
 #[cfg(target_feature = "simd128")]
@@ -86,9 +108,10 @@ pub(crate) unsafe fn vec_dot_f32(a_row: *const f32, b_row: *const f32, c: *mut f
     CurrentCpu::vec_reduce(sum, c);
 
     // leftovers
-    for i in np..k {
-        *c += *a_row.add(i) * (*b_row.add(i));
-    }
+    // for i in np..k {
+    //     *c = (*a_row.add(i)).mul_add(*b_row.add(i), *c);
+    // }
+    CurrentCpu::scala_fma(a_row, b_row, k - np, c);
 }
 
 #[cfg(not(any(
@@ -99,8 +122,8 @@ pub(crate) unsafe fn vec_dot_f32(a_row: *const f32, b_row: *const f32, c: *mut f
 #[inline(always)]
 pub(crate) unsafe fn vec_dot_f32(a_row: *const f32, b_row: *const f32, c: *mut f32, k: usize) {
     // leftovers
-    for i in 0..k {
-        *c += *a_row.add(i) * (*b_row.add(i));
+    for i in np..k {
+        *c = (*a_row.add(i)).mul_add(*b_row.add(i), *c);
     }
 }
 
@@ -126,9 +149,10 @@ pub(crate) unsafe fn vec_sum(row: *const f32, b: *mut f32, k: usize) {
     CurrentCpu::vec_reduce(sum, b);
 
     // leftovers
-    for i in np..k {
-        *b += *row.add(i)
-    }
+    // for i in np..k {
+    //     *b += *row.add(i)
+    // }
+    CurrentCpu::scala_sum(row, k - np, b);
 }
 
 #[cfg(not(any(
@@ -167,7 +191,7 @@ pub(crate) unsafe fn vec_dot_f16(a_row: *const f16, b_row: *const f16, c: *mut f
 
     // leftovers
     for i in np..k {
-        sumf += (*a_row.add(i)).to_f32() * (*b_row.add(i)).to_f32();
+        sumf = (*a_row.add(i)).to_f32().mul_add((*b_row.add(i)).to_f32(), sumf);
     }
     *c = sumf;
 }

@@ -39,6 +39,7 @@ impl crate::scalar::Scalar {
         use crate::scalar::Scalar;
         match self {
             Scalar::U8(v) => builder.arg(v),
+            Scalar::U16(v) => builder.arg(v),
             Scalar::U32(v) => builder.arg(v),
             Scalar::I64(v) => builder.arg(v),
             Scalar::F32(v) => builder.arg(v),
@@ -63,6 +64,7 @@ impl SlicePtrOrNull<usize> {
 #[derive(Debug)]
 pub enum CudaStorageSlice {
     U8(CudaSlice<u8>),
+    U16(CudaSlice<u16>),
     U32(CudaSlice<u32>),
     I64(CudaSlice<i64>),
     BF16(CudaSlice<bf16>),
@@ -1297,6 +1299,7 @@ impl BackendStorage for CudaStorage {
     fn dtype(&self) -> DType {
         match self.slice {
             CudaStorageSlice::U8(_) => DType::U8,
+            CudaStorageSlice::U16(_) => DType::U16,
             CudaStorageSlice::U32(_) => DType::U32,
             CudaStorageSlice::I64(_) => DType::I64,
             CudaStorageSlice::BF16(_) => DType::BF16,
@@ -1320,6 +1323,7 @@ impl BackendStorage for CudaStorage {
         let src_o = layout.start_offset();
         let ((src, _guard_src), kernel_name) = match &mut self.slice {
             S::U8(s) => (slice_ptr(s, src_o), "const_set_u8"),
+            S::U16(s) => (slice_ptr(s, src_o), "const_set_u16"),
             S::U32(s) => (slice_ptr(s, src_o), "const_set_u32"),
             S::I64(s) => (slice_ptr(s, src_o), "const_set_i64"),
             S::BF16(s) => (slice_ptr(s, src_o), "const_set_bf16"),
@@ -1353,6 +1357,7 @@ impl BackendStorage for CudaStorage {
         // is used.
         let (inp, _guard) = match &self.slice {
             CudaStorageSlice::U8(inp) => slice_ptr(inp, start_o),
+            CudaStorageSlice::U16(inp) => slice_ptr(inp, start_o),
             CudaStorageSlice::U32(inp) => slice_ptr(inp, start_o),
             CudaStorageSlice::I64(inp) => slice_ptr(inp, start_o),
             CudaStorageSlice::BF16(inp) => slice_ptr(inp, start_o),
@@ -1375,6 +1380,17 @@ impl BackendStorage for CudaStorage {
                 builder.arg(&out);
                 unsafe { builder.launch(cfg) }.w()?;
                 CudaStorageSlice::U8(out)
+            }
+            DType::U16 => {
+                let out = unsafe { dev.alloc::<u16>(el)? };
+                let mut builder = func.builder();
+                barg!(builder, el);
+                barg!(builder, dims.len());
+                ds.builder_arg(&mut builder);
+                barg!(builder, *inp);
+                builder.arg(&out);
+                unsafe { builder.launch(cfg) }.w()?;
+                CudaStorageSlice::U16(out)
             }
             DType::U32 => {
                 let out = unsafe { dev.alloc::<u32>(el)? };
@@ -1501,6 +1517,10 @@ impl BackendStorage for CudaStorage {
             CudaStorageSlice::U8(slice) => {
                 let cpu_storage = slice.stream().memcpy_dtov(slice).w()?;
                 Ok(CpuStorage::U8(cpu_storage))
+            }
+            CudaStorageSlice::U16(slice) => {
+                let cpu_storage = slice.stream().memcpy_dtov(slice).w()?;
+                Ok(CpuStorage::U16(cpu_storage))
             }
             CudaStorageSlice::U32(slice) => {
                 let cpu_storage = slice.stream().memcpy_dtov(slice).w()?;

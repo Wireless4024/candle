@@ -6,7 +6,7 @@ use crate::op::{BinaryOpT, CmpOp, ReduceOp, UnaryOpT};
 use crate::{CpuStorage, CpuStorageRef, DType, Layout, Result, Shape};
 use candle_metal_kernels::{BufferOffset, CallConvTranspose2dCfg, Kernels};
 use metal::{Buffer, MTLResourceOptions, NSUInteger};
-use std::collections::HashMap;
+use ahash::*;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, PoisonError, RwLock, TryLockError};
 

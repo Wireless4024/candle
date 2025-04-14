@@ -35,7 +35,7 @@ impl<R: Read + Seek> Gguf<R> {
         RmsNorm::from_qtensor(ws, eps)
     }
 
-    fn metadata(&self) -> &std::collections::HashMap<String, gguf_file::Value> {
+    fn metadata(&self) -> &ahash::HashMap<String, gguf_file::Value> {
         &self.ct.metadata
     }
 

@@ -2157,14 +2157,19 @@ impl Tensor {
 
     /// Compared to clone, this copies the actual storage but may fail because of running out of
     /// memory.
+    #[inline(always)]
     pub fn copy(&self) -> Result<Tensor> {
+        self.copy_as_var(false)
+    }
+
+    pub fn copy_as_var(&self, var: bool) -> Result<Tensor> {
         let op = BackpropOp::new1(self, Op::Copy);
         let tensor_ = Tensor_ {
             id: TensorId::new(),
             storage: Arc::new(RwLock::new(self.storage().try_clone(self.layout())?)),
             layout: self.layout.clone(),
             op,
-            is_variable: false,
+            is_variable: var,
             dtype: self.dtype,
             device: self.device.clone(),
         };

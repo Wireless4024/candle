@@ -4,7 +4,7 @@ pub use candle_kernels as kernels;
 pub use cudarc;
 use cudarc::driver::CudaFunction;
 use half::{bf16, f16};
-use std::collections::HashMap;
+use ahash::*;
 use std::sync::{Arc, Mutex};
 
 use super::{CudaError, CudaStorage, CudaStorageSlice, WrapErr};
@@ -302,6 +302,10 @@ impl BackendDevice for CudaDevice {
                 let data = self.alloc_zeros::<u8>(elem_count)?;
                 CudaStorageSlice::U8(data)
             }
+            DType::U16 => {
+                let data = self.alloc_zeros::<u16>(elem_count)?;
+                CudaStorageSlice::U16(data)
+            }
             DType::U32 => {
                 let data = self.alloc_zeros::<u32>(elem_count)?;
                 CudaStorageSlice::U32(data)
@@ -339,7 +343,7 @@ impl BackendDevice for CudaDevice {
         let slice = match dtype {
             // TODO: Add support for F16 and BF16 though this is likely to require some upstream
             // cudarc changes.
-            DType::U8 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 => {
+            DType::U8 | DType::U16 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 => {
                 Err(CudaError::UnsupportedDtype {
                     dtype,
                     op: "rand_uniform",
@@ -383,7 +387,7 @@ impl BackendDevice for CudaDevice {
             elem_count
         };
         let slice = match dtype {
-            DType::U8 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 => {
+            DType::U8 | DType::U16 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 => {
                 Err(CudaError::UnsupportedDtype {
                     dtype,
                     op: "rand_normal",
@@ -416,6 +420,10 @@ impl BackendDevice for CudaDevice {
             DType::U8 => {
                 let data = self.alloc::<u8>(elem_count)?;
                 CudaStorageSlice::U8(data)
+            }
+            DType::U16 => {
+                let data = self.alloc::<u16>(elem_count)?;
+                CudaStorageSlice::U16(data)
             }
             DType::U32 => {
                 let data = self.alloc::<u32>(elem_count)?;
@@ -454,6 +462,10 @@ impl BackendDevice for CudaDevice {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U8(data)
             }
+            CpuStorageRef::U16(storage) => {
+                let data = self.memcpy_stod(storage)?;
+                CudaStorageSlice::U16(data)
+            }
             CpuStorageRef::U32(storage) => {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U32(data)
@@ -491,6 +503,10 @@ impl BackendDevice for CudaDevice {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U8(data)
             }
+            CpuStorage::U16(storage) => {
+                let data = self.memcpy_stod(storage)?;
+                CudaStorageSlice::U16(data)
+            }
             CpuStorage::U32(storage) => {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U32(data)
@@ -527,6 +543,10 @@ impl BackendDevice for CudaDevice {
             CpuStorage::U8(storage) => {
                 let data = self.memcpy_stod(&storage)?;
                 CudaStorageSlice::U8(data)
+            }
+            CpuStorage::U16(storage) => {
+                let data = self.memcpy_stod(&storage)?;
+                CudaStorageSlice::U16(data)
             }
             CpuStorage::U32(storage) => {
                 let data = self.memcpy_stod(&storage)?;

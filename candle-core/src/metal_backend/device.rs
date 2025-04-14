@@ -1,7 +1,7 @@
 use crate::{DType, Result};
 use candle_metal_kernels::Kernels;
 use metal::{Buffer, CommandBuffer, CommandQueue, MTLResourceOptions, NSUInteger};
-use std::collections::HashMap;
+use ahash::*;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 

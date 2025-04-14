@@ -3,7 +3,7 @@
 use super::{k_quants, GgmlDType, QStorage};
 use crate::{Device, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 
 // https://github.com/ggerganov/llama.cpp/blob/468ea24fb4633a0d681f7ac84089566c1c6190cb/llama.h#L37
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

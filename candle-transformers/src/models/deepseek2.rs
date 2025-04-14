@@ -44,6 +44,7 @@ impl CustomOp1 for NonZero {
         }
         let result = match storage {
             candle::CpuStorage::U8(vs) => self.nonzero(vs, layout),
+            candle::CpuStorage::U16(vs) => self.nonzero(vs, layout),
             candle::CpuStorage::U32(vs) => self.nonzero(vs, layout),
             candle::CpuStorage::I64(vs) => self.nonzero(vs, layout),
             candle::CpuStorage::BF16(vs) => self.nonzero(vs, layout),

@@ -3,7 +3,7 @@
 // composable/tensor agnostic at some point.
 use crate::{Context, DType, Error as E, Layout, Result, Tensor};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 use std::io::BufRead;
 
 const VERBOSE: bool = false;

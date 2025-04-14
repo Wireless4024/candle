@@ -4,7 +4,22 @@
 //! with support for temperature-based sampling, top-k filtering, nucleus sampling (top-p),
 //! and combinations thereof.
 use candle::{Context, DType, Error, Result, Tensor};
-use rand::{distr::Distribution, SeedableRng};
+use rand::{Rng, SeedableRng};
+
+fn fast_weight_rand(rng: &mut impl Rng, weights: &[f32]) -> Option<usize> {
+    if weights.is_empty() {
+        return None;
+    }
+    let sum = weights.iter().sum::<f32>();
+    let mut num = rng.random_range(0.0..sum);
+    for (i, w) in weights.iter().enumerate() {
+        num -= w;
+        if num < 0.0 {
+            return Some(i);
+        }
+    }
+    None
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Sampling {
@@ -57,8 +72,11 @@ impl LogitsProcessor {
     }
 
     fn sample_multinomial(&mut self, prs: &Vec<f32>) -> Result<u32> {
-        let distr = rand::distr::weighted::WeightedIndex::new(prs).map_err(Error::wrap)?;
-        let next_token = distr.sample(&mut self.rng) as u32;
+        let next_token = if let Some(idx) = fast_weight_rand(&mut self.rng, &prs) {
+            idx as u32
+        } else {
+            return Err(Error::msg("empty logits"));
+        };
         Ok(next_token)
     }
 

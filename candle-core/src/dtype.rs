@@ -8,6 +8,8 @@ use crate::{CpuStorage, CpuStorageRef, Error, Result};
 pub enum DType {
     // Unsigned 8 bits integer.
     U8,
+    // Unsigned 16 bits integer.
+    U16,
     // Unsigned 32 bits integer.
     U32,
     // Signed 64 bits integer.
@@ -38,6 +40,7 @@ impl std::str::FromStr for DType {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "u8" => Ok(Self::U8),
+            "u16" => Ok(Self::U16),
             "u32" => Ok(Self::U32),
             "i64" => Ok(Self::I64),
             "bf16" => Ok(Self::BF16),
@@ -54,6 +57,7 @@ impl DType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::U8 => "u8",
+            Self::U16 => "u16",
             Self::U32 => "u32",
             Self::I64 => "i64",
             Self::BF16 => "bf16",
@@ -67,6 +71,7 @@ impl DType {
     pub fn size_in_bytes(&self) -> usize {
         match self {
             Self::U8 => 1,
+            Self::U16 => 2,
             Self::U32 => 4,
             Self::I64 => 8,
             Self::BF16 => 2,
@@ -78,14 +83,14 @@ impl DType {
 
     pub fn is_int(&self) -> bool {
         match self {
-            Self::U8 | Self::U32 | Self::I64 => true,
+            Self::U8 | Self::U16 | Self::U32 | Self::I64 => true,
             Self::BF16 | Self::F16 | Self::F32 | Self::F64 => false,
         }
     }
 
     pub fn is_float(&self) -> bool {
         match self {
-            Self::U8 | Self::U32 | Self::I64 => false,
+            Self::U8 | Self::U16 | Self::U32 | Self::I64 => false,
             Self::BF16 | Self::F16 | Self::F32 | Self::F64 => true,
         }
     }
@@ -173,6 +178,7 @@ macro_rules! with_dtype {
 use half::{bf16, f16};
 
 with_dtype!(u8, U8, |v: f64| v as u8, |v: u8| v as f64);
+with_dtype!(u16, U16, |v: f64| v as u16, |v: u16| v as f64);
 with_dtype!(u32, U32, |v: f64| v as u32, |v: u32| v as f64);
 with_dtype!(i64, I64, |v: f64| v as i64, |v: i64| v as f64);
 with_dtype!(f16, F16, f16::from_f64, f16::to_f64);

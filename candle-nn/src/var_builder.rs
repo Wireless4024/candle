@@ -3,10 +3,12 @@
 //! A `VarBuilder` is used to retrieve variables used by a model. These variables can either come
 //! from a pre-trained checkpoint, e.g. using `VarBuilder::from_mmaped_safetensors`, or initialized
 //! for training, e.g. using `VarBuilder::from_varmap`.
+
+use std::hash::BuildHasher;
 use crate::VarMap;
 use candle::{safetensors::Load, DType, Device, Error, Result, Shape, Tensor};
 use safetensors::{slice::IndexOp, tensor::SafeTensors};
-use std::collections::HashMap;
+use ahash::*;
 use std::sync::Arc;
 
 /// A structure used to retrieve variables, these variables can either come from storage or be
@@ -15,7 +17,7 @@ use std::sync::Arc;
 /// The way to retrieve variables is defined in the backend embedded in the `VarBuilder`.
 pub struct VarBuilderArgs<'a, B: Backend> {
     data: Arc<TensorData<B>>,
-    path: Vec<String>,
+    path: Vec<candle::tweaks::ArcStr>,
     pub dtype: DType,
     _phantom: std::marker::PhantomData<&'a B>,
 }
@@ -109,8 +111,8 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Returns the prefix of the `VarBuilder`.
-    pub fn prefix(&self) -> String {
-        self.path.join(".")
+    pub fn prefix(&self) -> candle::tweaks::ArcStr {
+        candle::tweaks::ArcStr::join(".", &self.path)
     }
 
     /// Returns a new `VarBuilder` using the root path.
@@ -124,10 +126,10 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Returns a new `VarBuilder` with the prefix set to `prefix`.
-    pub fn set_prefix(&self, prefix: impl ToString) -> Self {
+    pub fn set_prefix(&self, prefix: impl std::fmt::Display) -> Self {
         Self {
             data: self.data.clone(),
-            path: vec![prefix.to_string()],
+            path: vec![candle::tweaks::ArcStr::new(prefix)],
             dtype: self.dtype,
             _phantom: std::marker::PhantomData,
         }
@@ -135,9 +137,9 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
 
     /// Return a new `VarBuilder` adding `s` to the current prefix. This can be think of as `cd`
     /// into a directory.
-    pub fn push_prefix<S: ToString>(&self, s: S) -> Self {
+    pub fn push_prefix<S: std::fmt::Display>(&self, s: S) -> Self {
         let mut path = self.path.clone();
-        path.push(s.to_string());
+        path.push(candle::tweaks::ArcStr::new(s));
         Self {
             data: self.data.clone(),
             path,
@@ -147,7 +149,8 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Short alias for `push_prefix`.
-    pub fn pp<S: ToString>(&self, s: S) -> Self {
+    #[inline(always)]
+    pub fn pp<S: std::fmt::Display>(&self, s: S) -> Self {
         self.push_prefix(s)
     }
 
@@ -171,11 +174,11 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
         }
     }
 
-    fn path(&self, tensor_name: &str) -> String {
+    fn path(&self, tensor_name: &str) -> candle::tweaks::ArcStr {
         if self.path.is_empty() {
-            tensor_name.to_string()
+            tensor_name.into()
         } else {
-            [&self.path.join("."), tensor_name].join(".")
+            candle::tweaks::ArcStr::join(".", self.path.iter().map(|x| x.as_str()).chain(Some(tensor_name)))
         }
     }
 
@@ -229,7 +232,7 @@ impl SimpleBackend for Zeros {
     }
 }
 
-impl SimpleBackend for HashMap<String, Tensor> {
+impl<H: BuildHasher + Send + Sync> SimpleBackend for std::collections::HashMap<String, Tensor, H> {
     fn get(
         &self,
         s: Shape,
@@ -242,7 +245,7 @@ impl SimpleBackend for HashMap<String, Tensor> {
             .get(name)
             .ok_or_else(|| {
                 Error::CannotFindTensor {
-                    path: name.to_string(),
+                    path: name.into(),
                 }
                 .bt()
             })?
@@ -297,7 +300,7 @@ impl SimpleBackend for SafeTensorWithRouting<'_> {
     ) -> Result<Tensor> {
         let index = self.routing.get(path).ok_or_else(|| {
             Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt()
         })?;
@@ -332,7 +335,7 @@ impl SimpleBackend for candle::npy::NpzTensors {
     ) -> Result<Tensor> {
         let tensor = match self.get(path)? {
             None => Err(Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt())?,
             Some(tensor) => tensor,
@@ -365,7 +368,7 @@ impl SimpleBackend for candle::pickle::PthTensors {
     ) -> Result<Tensor> {
         let tensor = match self.get(path)? {
             None => Err(Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt())?,
             Some(tensor) => tensor,
@@ -492,7 +495,7 @@ impl<'a> VarBuilder<'a> {
 
     /// Initializes a `VarBuilder` that retrieves tensors stored in a hashtable. An error is
     /// returned if no tensor is available under the requested path or on shape mismatches.
-    pub fn from_tensors(ts: HashMap<String, Tensor>, dtype: DType, dev: &Device) -> Self {
+    pub fn from_tensors<H: BuildHasher + Send + Sync + 'static>(ts: std::collections::HashMap<String, Tensor, H>, dtype: DType, dev: &Device) -> Self {
         Self::from_backend(Box::new(ts), dtype, dev.clone())
     }
 

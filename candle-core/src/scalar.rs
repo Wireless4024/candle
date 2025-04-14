@@ -6,6 +6,7 @@ use half::{bf16, f16};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Scalar {
     U8(u8),
+    U16(u16),
     U32(u32),
     I64(i64),
     BF16(bf16),
@@ -24,6 +25,7 @@ impl Scalar {
     pub fn zero(dtype: DType) -> Self {
         match dtype {
             DType::U8 => Scalar::U8(0),
+            DType::U16 => Scalar::U16(0),
             DType::U32 => Scalar::U32(0),
             DType::I64 => Scalar::I64(0),
             DType::BF16 => Scalar::BF16(bf16::ZERO),
@@ -36,6 +38,7 @@ impl Scalar {
     pub fn one(dtype: DType) -> Self {
         match dtype {
             DType::U8 => Scalar::U8(1),
+            DType::U16 => Scalar::U16(1),
             DType::U32 => Scalar::U32(1),
             DType::I64 => Scalar::I64(1),
             DType::BF16 => Scalar::BF16(bf16::ONE),
@@ -48,6 +51,7 @@ impl Scalar {
     pub fn dtype(&self) -> DType {
         match self {
             Scalar::U8(_) => DType::U8,
+            Scalar::U16(_) => DType::U16,
             Scalar::U32(_) => DType::U32,
             Scalar::I64(_) => DType::I64,
             Scalar::BF16(_) => DType::BF16,
@@ -60,6 +64,7 @@ impl Scalar {
     pub fn to_f64(&self) -> f64 {
         match self {
             Scalar::U8(v) => *v as f64,
+            Scalar::U16(v) => *v as f64,
             Scalar::U32(v) => *v as f64,
             Scalar::I64(v) => *v as f64,
             Scalar::BF16(v) => v.to_f64(),

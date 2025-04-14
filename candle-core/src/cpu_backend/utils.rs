@@ -1,3 +1,4 @@
+use std::hint::assert_unchecked;
 /// Helper functions to write CPU kernels.
 use crate::backend::BackendStorage;
 use crate::{Error, Layout, Result, WithDType};
@@ -9,6 +10,7 @@ pub trait Map1 {
     fn map(&self, vs: &C, layout: &Layout) -> Result<C> {
         match vs {
             C::U8(vs) => Ok(C::U8(self.f(vs, layout)?)),
+            C::U16(vs) => Ok(C::U16(self.f(vs, layout)?)),
             C::U32(vs) => Ok(C::U32(self.f(vs, layout)?)),
             C::I64(vs) => Ok(C::I64(self.f(vs, layout)?)),
             C::BF16(vs) => Ok(C::BF16(self.f(vs, layout)?)),
@@ -25,6 +27,7 @@ pub trait Map1Any {
     fn map(&self, vs: &C, layout: &Layout) -> Result<C> {
         match vs {
             C::U8(vs) => Ok(self.f(vs, layout, C::U8)?),
+            C::U16(vs) => Ok(self.f(vs, layout, C::U16)?),
             C::U32(vs) => Ok(self.f(vs, layout, C::U32)?),
             C::I64(vs) => Ok(self.f(vs, layout, C::I64)?),
             C::BF16(vs) => Ok(self.f(vs, layout, C::BF16)?),
@@ -316,12 +319,14 @@ pub fn unary_map<T: Copy, U: Copy, F: FnMut(T) -> U>(
             if block_len == 1 {
                 for index in block_start_index {
                     let v = unsafe { vs.get_unchecked(index) };
+                    unsafe { assert_unchecked(result.len() < result.capacity()); }
                     result.push(f(*v))
                 }
             } else {
                 for index in block_start_index {
                     for offset in 0..block_len {
                         let v = unsafe { vs.get_unchecked(index + offset) };
+                        unsafe { assert_unchecked(result.len() < result.capacity()); }
                         result.push(f(*v))
                     }
                 }
