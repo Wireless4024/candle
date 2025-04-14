@@ -232,7 +232,10 @@ impl<S: WithDType> NdArray for Vec<Vec<Vec<Vec<S>>>> {
 
 impl Device {
     pub fn new_cuda(ordinal: usize) -> Result<Self> {
-        Ok(Self::Cuda(crate::CudaDevice::new(ordinal)?))
+        let mut device = crate::CudaDevice::new(ordinal)?;
+        // pre compile the modules when create cuda device
+        device.preload_modules()?;
+        Ok(Self::Cuda(device))
     }
 
     pub fn as_cuda_device(&self) -> Result<&crate::CudaDevice> {

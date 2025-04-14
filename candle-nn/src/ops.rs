@@ -1,8 +1,10 @@
 //! Tensor ops.
 //!
 
-use candle::{CpuStorage, DType, Layout, Module, Result, Shape, Tensor, D};
+use std::borrow::Cow;
+use candle::{CpuStorage, DType, Error, Layout, Module, Result, Shape, Tensor, D};
 use rayon::prelude::*;
+use crate::VarBuilder;
 
 /// Applies the softmax function to the input tensor, rescaling the element so that elements on
 /// a slice of fixed index on dimension `dim` are between 0 and 1 and sum to 1.
@@ -300,6 +302,18 @@ impl Dropout {
 impl candle::ModuleT for Dropout {
     fn forward_t(&self, xs: &Tensor, train: bool) -> Result<Tensor> {
         self.forward(xs, train)
+    }
+}
+
+impl crate::tweaks::SerializableModule for Dropout {
+    type Config = f32;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, _: VarBuilder) -> std::result::Result<Self, Error> {
+        Ok(Self::new(config))
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(self.drop_p)
     }
 }
 
