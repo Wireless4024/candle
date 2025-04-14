@@ -28,15 +28,33 @@
 //! ```
 //!
 //! [`Layer Normalization`]: https://arxiv.org/abs/1607.06450
-use candle::{DType, Module, Result, Tensor, D};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::borrow::Cow;
+use candle::{DType, Error, Module, Result, Tensor, D};
+use crate::VarBuilder;
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LayerNormConfig {
+    #[serde(default = "default_eps")]
     pub eps: f64,
     /// Whether to remove the mean or not, the default is true and when set to false, this turns
     /// this layer into RmsNorm.
+    #[serde(default = "default_remove_mean")]
     pub remove_mean: bool,
+    #[serde(default = "default_affine")]
     pub affine: bool,
+}
+
+fn default_eps() -> f64 {
+    1e-5
+}
+
+fn default_remove_mean() -> bool {
+    true
+}
+
+fn default_affine() -> bool {
+    true
 }
 
 impl Default for LayerNormConfig {
@@ -141,7 +159,10 @@ pub fn layer_norm<C: Into<LayerNormConfig>>(
     vb: crate::VarBuilder,
 ) -> Result<LayerNorm> {
     let config = config.into();
-    let weight = vb.get_with_hints(size, "weight", crate::Init::Const(1.))?;
+    let weight = {
+        let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::NoDecay);
+        vb.get_with_hints(size, "weight", crate::Init::Const(1.))?
+    };
     let bias = if config.affine {
         Some(vb.get_with_hints(size, "bias", crate::Init::Const(0.))?)
     } else {
@@ -162,6 +183,38 @@ pub fn layer_norm_no_bias(size: usize, eps: f64, vb: crate::VarBuilder) -> Resul
         affine: false,
     };
     layer_norm(size, config, vb)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct LayerNormConfigWrapper {
+    size: usize,
+    #[serde(flatten)]
+    inner: LayerNormConfig,
+}
+
+impl crate::tweaks::SerializableModule for LayerNorm {
+    type Config = LayerNormConfigWrapper;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: VarBuilder) -> std::result::Result<Self, Error> {
+        layer_norm(config.size, config.inner, vb)
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(LayerNormConfigWrapper {
+            size: self.weight.dims()[0],
+            inner: LayerNormConfig{
+                eps: self.eps,
+                remove_mean: self.remove_mean,
+                affine: self.bias.is_some(),
+            },
+        })
+    }
+}
+
+impl candle::tweaks::ParameterCount for LayerNorm {
+    fn parameter_count(&self) -> usize {
+        self.weight.parameter_count()
+    }
 }
 
 /// RmsNorm is a specialized version of the LayerNorm module.
@@ -200,4 +253,32 @@ pub fn rms_norm(size: usize, eps: f64, vb: crate::VarBuilder) -> Result<RmsNorm>
         affine: false,
     };
     Ok(RmsNorm(layer_norm(size, config, vb)?))
+}
+
+// --
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct RmsNormConfig {
+    pub size: usize,
+    pub eps: f64,
+}
+
+impl crate::tweaks::SerializableModule for RmsNorm {
+    type Config = RmsNormConfig;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: VarBuilder) -> std::result::Result<Self, candle::Error> {
+        rms_norm(config.size, config.eps, vb)
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(RmsNormConfig {
+            size: self.0.weight.dims()[0],
+            eps: self.0.eps,
+        })
+    }
+}
+
+impl candle::tweaks::ParameterCount for RmsNorm {
+    fn parameter_count(&self) -> usize {
+        self.0.weight.parameter_count()
+    }
 }

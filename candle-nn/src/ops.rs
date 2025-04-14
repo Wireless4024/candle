@@ -1,8 +1,11 @@
 //! Tensor ops.
 //!
 
-use candle::{CpuStorage, DType, Layout, Module, Result, Shape, Tensor, D};
+use std::borrow::Cow;
+use candle::{CpuStorage, DType, Error, Layout, Module, Result, Shape, Tensor, D};
 use rayon::prelude::*;
+use candle::tweaks::flags::is_training;
+use crate::VarBuilder;
 
 /// Applies the softmax function to the input tensor, rescaling the element so that elements on
 /// a slice of fixed index on dimension `dim` are between 0 and 1 and sum to 1.
@@ -283,13 +286,19 @@ pub struct Dropout {
     drop_p: f32,
 }
 
+impl Module for Dropout {
+    fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+        self.forward(xs, is_training())
+    }
+}
+
 impl Dropout {
     pub fn new(drop_p: f32) -> Dropout {
         Self { drop_p }
     }
 
     pub fn forward(&self, xs: &Tensor, train: bool) -> Result<Tensor> {
-        if train {
+        if train && self.drop_p > 0.0 {
             dropout(xs, self.drop_p)
         } else {
             Ok(xs.clone())
@@ -300,6 +309,18 @@ impl Dropout {
 impl candle::ModuleT for Dropout {
     fn forward_t(&self, xs: &Tensor, train: bool) -> Result<Tensor> {
         self.forward(xs, train)
+    }
+}
+
+impl crate::tweaks::SerializableModule for Dropout {
+    type Config = f32;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, _: VarBuilder) -> std::result::Result<Self, Error> {
+        Ok(Self::new(config))
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(self.drop_p)
     }
 }
 
@@ -453,6 +474,15 @@ impl candle::CustomOp1 for SoftmaxLastDim {
 
 pub fn softmax_last_dim(xs: &Tensor) -> Result<Tensor> {
     xs.apply_op1_no_bwd(&SoftmaxLastDim)
+}
+
+/// Softmax last dim and automatic detect if training and swap to use backward compatible method.
+pub fn softmax_last_dim_auto(xs: &Tensor) -> Result<Tensor> {
+    if is_training() {
+        softmax(xs, D::Minus1)
+    } else {
+        xs.apply_op1_no_bwd(&SoftmaxLastDim)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1227,4 +1257,126 @@ impl candle::CustomOp3 for Sdpa {
 ///     - GQA is not supported (requires `qhead` == `kv_head`)
 pub fn sdpa(q: &Tensor, k: &Tensor, v: &Tensor, scale: f32, softcapping: f32) -> Result<Tensor> {
     q.apply_op3_no_bwd(k, v, &Sdpa { scale, softcapping })
+}
+
+/// Top-k along the **last** dimension.
+/// Returns (topk_values, topk_indices) with shape [..., K].
+pub fn topk_last_dim(x: &Tensor, k: usize, largest: bool) -> Result<(Tensor, Tensor)> {
+    // Guard: clamp k to the size of the last dimension to avoid narrow() panics.
+    let last_dim = x.dims().last().copied().unwrap_or(0);
+    let kk = k.min(last_dim);
+    // (Optional) early return if kk == 0
+    if kk == 0 {
+        // Return empty tensors with the right shapes.
+        let topk_idx = x.zeros_like()?.narrow(D::Minus1, 0, 0)?; // empty slice
+        let topk_vals = topk_idx.clone();
+        return Ok((topk_vals, topk_idx));
+    }
+
+    // In candle, arg_sort_last_dim(false) sorts descending (largest-first).
+    let sorted_idx = x.arg_sort_last_dim(!largest)?; // keep the original convention
+
+    // Take the first kk indices/values along the last dim.
+    let topk_idx = sorted_idx.narrow(D::Minus1, 0, kk)?.contiguous()?;
+    let topk_vals = x.gather(&topk_idx, D::Minus1)?;
+    Ok((topk_vals, topk_idx))
+}
+
+/// One-hot encode an integer tensor of arbitrary shape into an extra class dim.
+/// - `indices`: integer tensor (i32/u32) of shape S
+/// - `depth`: number of classes
+/// - `out_dtype`: output dtype (usually F32/F16/BF16)
+/// Returns tensor of shape S + [depth]
+pub fn one_hot(indices: &Tensor, depth: usize, out_dtype: DType) -> Result<Tensor> {
+    let device = indices.device();
+
+    // Cast to an integer dtype and add a trailing singleton dim: S -> S + [1]
+    let idx = indices.to_dtype(DType::U32)?.unsqueeze(D::Minus1)?;
+
+    // Target output shape: S + [depth]
+    let mut out_shape = idx.dims().to_vec(); // S + [1]
+    if out_shape.is_empty() {
+        // scalar -> [1] so we can append depth below
+        out_shape.push(1);
+    }
+    // replace the trailing 1 with `depth`
+    *out_shape.last_mut().unwrap() = depth;
+
+    // Build class ids with shape [1,1,...,1, depth] (same rank as out_shape)
+    let mut class_shape = vec![1usize; out_shape.len()];
+    *class_shape.last_mut().unwrap() = depth;
+
+    let class_ids = Tensor::arange(0u32, depth as _, device)?
+        .reshape(class_shape)? // [1,1,...,1,depth]
+        .broadcast_as(&*out_shape)?; // -> S + [depth]
+
+    // Expand idx from S + [1] to S + [depth]
+    let idx_b = idx.broadcast_as(&*out_shape)?; // -> S + [depth]
+
+    // Equality then cast to requested dtype.
+    let oh = idx_b
+        .eq(&class_ids)? // bool, S + [depth]
+        .to_dtype(out_dtype)?;
+    Ok(oh)
+}
+
+// default: threshold = 20
+pub fn softplus(x: &Tensor, beta: Option<f64>, threshold: f64) -> Result<Tensor> {
+    let z = if let Some(beta) = beta { (x * beta)? } else { x.clone() };
+    let y_low = (1.0 + z.exp()?)?.log()?;
+    let y_low = if let Some(beta) = beta {
+        ((1.0 / beta) * y_low)?
+    } else {
+        y_low.clone()
+    };
+    let mask = z.gt(threshold)?;
+    mask.where_cond(x, &y_low)
+}
+
+pub fn softplus_stable(x: &Tensor, beta: Option<f64>) -> Result<Tensor> {
+    let beta = beta.unwrap_or(1.0);
+    let bx = (x * beta)?;
+    let abs_bx = bx.abs()?;
+    // relu(x) = max(x, 0); implemented via where on (x > 0)
+    let zero = x.zeros_like()?;
+    let relu_x = x.gt(0.0)?.where_cond(x, &zero)?;
+    // log1p(exp(-|b x|)) ≈ log(1 + exp(-|b x|))
+    let tail = (abs_bx.neg()?.exp()? + 1.0)?.log()?;
+    relu_x + (tail * (1.0 / beta))?
+}
+
+/// Switch-Transformer aux loss: E * sum_i ( f_i * p_i )
+/// - f_i: fraction of tokens *assigned* to expert i (from topk indices).
+/// - p_i: fraction of router *probability mass* given to expert i (from softmax probs).
+pub fn moe_load_balance_loss(
+    routing_probs: &Tensor, // [N, E]
+    topk_idx: &Tensor,      // [N, K] (int)
+    num_experts: usize,
+) -> Result<f64> {
+    // p_i: average probability per expert
+    let p = routing_probs.mean(D::Minus2)?; // [E]
+
+    // f_i: average assignment fraction per expert (from top-k choices)
+    // Build one-hot over experts for assignments: [N, K, E] -> sum over K -> [N, E]
+    let oh = one_hot(topk_idx, num_experts, routing_probs.dtype())?; // [N, K, E]
+    let assigned = oh.sum(D::Minus2)?; // [N, E]
+    let f = assigned.mean(D::Minus2)?; // [E]
+
+    // Loss: E * sum_i f_i * p_i
+    let fp = (&f * &p)?.sum_all()?.to_dtype(DType::F64)?.to_scalar::<f64>()?; // scalar
+    Ok(fp * (num_experts as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle::Device;
+
+    #[test]
+    fn test_one_hot() -> candle::Result<()> {
+        let base = Tensor::new(&[0u32, 1, 2, 3], &Device::Cpu)?;
+        let x = one_hot(&base, 4, DType::F32)?;
+        println!("{}", x);
+        Ok(())
+    }
 }

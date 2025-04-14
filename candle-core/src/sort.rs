@@ -26,7 +26,7 @@ impl ArgSort {
                         .iter_mut()
                         .enumerate()
                         .for_each(|(i, v)| *v = i as u32);
-                    indexes.sort_by(|&i, &j| {
+                    indexes.sort_unstable_by(|&i, &j| {
                         vs[i as usize]
                             .partial_cmp(&vs[j as usize])
                             .unwrap_or(std::cmp::Ordering::Greater)
@@ -41,7 +41,7 @@ impl ArgSort {
                         .iter_mut()
                         .enumerate()
                         .for_each(|(i, v)| *v = i as u32);
-                    indexes.sort_by(|&j, &i| {
+                    indexes.sort_unstable_by(|&j, &i| {
                         vs[i as usize]
                             .partial_cmp(&vs[j as usize])
                             .unwrap_or(std::cmp::Ordering::Greater)
@@ -121,6 +121,7 @@ impl crate::CustomOp1 for ArgSort {
     ) -> Result<(crate::CpuStorage, crate::Shape)> {
         let sort_indexes = match storage {
             crate::CpuStorage::U8(vs) => self.asort(vs, layout),
+            crate::CpuStorage::U16(vs) => self.asort(vs, layout),
             crate::CpuStorage::U32(vs) => self.asort(vs, layout),
             crate::CpuStorage::I64(vs) => self.asort(vs, layout),
             crate::CpuStorage::BF16(vs) => self.asort(vs, layout),

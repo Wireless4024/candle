@@ -17,7 +17,10 @@
 //! assert_eq!(ys.to_vec2::<f32>()?, &[[210.0, 430.0, 650.0]]);
 //! # Ok(()) }
 //! ```
+
+use std::borrow::Cow;
 use candle::{Result, Tensor};
+use crate::VarBuilder;
 
 #[derive(Clone, Debug)]
 pub struct Linear {
@@ -78,12 +81,21 @@ impl super::Module for Linear {
     }
 }
 
+impl candle::tweaks::ParameterCount for Linear {
+    fn parameter_count(&self) -> usize {
+        self.weight.parameter_count() + self.bias.as_ref().map(|b| b.parameter_count()).unwrap_or_default()
+    }
+}
+
 /// Create or initialize a new linear layer.
 ///
 /// This uses some default names for weights and biases, namely `"weight"` and `"bias"`.
 pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     let init_ws = crate::init::DEFAULT_KAIMING_NORMAL;
-    let ws = vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?;
+    let ws = {
+        let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::GeometryAware);
+        vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?
+    };
     let bound = 1. / (in_dim as f64).sqrt();
     let init_bs = crate::Init::Uniform {
         lo: -bound,
@@ -96,6 +108,7 @@ pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Li
 /// Create or initialize a new linear layer without biases.
 pub fn linear_no_bias(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     let init_ws = crate::init::DEFAULT_KAIMING_NORMAL;
+    let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::GeometryAware);
     let ws = vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?;
     Ok(Linear::new(ws, None))
 }
@@ -110,5 +123,30 @@ pub fn linear_b(
         linear(in_dim, out_dim, vb)
     } else {
         linear_no_bias(in_dim, out_dim, vb)
+    }
+}
+
+// --
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct LinearConfig {
+    pub in_features: usize,
+    pub out_features: usize,
+    pub bias: bool,
+}
+
+impl crate::tweaks::SerializableModule for Linear {
+    type Config = LinearConfig;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: VarBuilder) -> std::result::Result<Self, candle::Error> {
+        linear_b(config.in_features, config.out_features, config.bias, vb)
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        let (in_features, out_features) = self.weight().get_linear_shape().unwrap();
+        Cow::Owned(LinearConfig {
+            in_features,
+            out_features,
+            bias: self.bias().is_some(),
+        })
     }
 }

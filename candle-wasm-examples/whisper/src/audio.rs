@@ -23,7 +23,7 @@ fn fft<T: Float>(inp: &[T]) -> Vec<T> {
     let mut odd = Vec::with_capacity(n / 2);
 
     for (i, &inp) in inp.iter().enumerate() {
-        if i % 2 == 0 {
+        if i.is_multiple_of(2) {
             even.push(inp)
         } else {
             odd.push(inp);

@@ -1,83 +1,5 @@
-//! Various optimization algorithms.
-use candle::{Result, Tensor, Var};
-
-/// The interface optimizers should implement.
-pub trait Optimizer: Sized {
-    type Config: Sized;
-
-    fn new(vars: Vec<Var>, config: Self::Config) -> Result<Self>;
-
-    fn step(&mut self, grads: &candle::backprop::GradStore) -> Result<()>;
-
-    fn learning_rate(&self) -> f64;
-
-    fn set_learning_rate(&mut self, lr: f64);
-
-    fn empty(config: Self::Config) -> Result<Self> {
-        Self::new(vec![], config)
-    }
-
-    fn backward_step(&mut self, loss: &Tensor) -> Result<()> {
-        let grads = loss.backward()?;
-        self.step(&grads)
-    }
-
-    fn from_slice(vars: &[&Var], config: Self::Config) -> Result<Self> {
-        let vars: Vec<_> = vars.iter().map(|&v| v.clone()).collect();
-        Self::new(vars, config)
-    }
-}
-
-/// Optimizer for Stochastic Gradient Descent.
-///
-/// Contrary to the PyTorch implementation of SGD, this version does not support momentum.
-#[derive(Debug)]
-pub struct SGD {
-    vars: Vec<Var>,
-    learning_rate: f64,
-}
-
-impl Optimizer for SGD {
-    type Config = f64;
-
-    fn new(vars: Vec<Var>, learning_rate: f64) -> Result<Self> {
-        let vars = vars
-            .into_iter()
-            .filter(|var| var.dtype().is_float())
-            .collect();
-        Ok(Self {
-            vars,
-            learning_rate,
-        })
-    }
-
-    fn learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-
-    fn step(&mut self, grads: &candle::backprop::GradStore) -> Result<()> {
-        for var in self.vars.iter() {
-            if let Some(grad) = grads.get(var) {
-                var.set(&var.sub(&(grad * self.learning_rate)?)?)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn set_learning_rate(&mut self, lr: f64) {
-        self.learning_rate = lr
-    }
-}
-
-impl SGD {
-    pub fn into_inner(self) -> Vec<Var> {
-        self.vars
-    }
-
-    pub fn push(&mut self, var: &Var) {
-        self.vars.push(var.clone())
-    }
-}
+use crate::Optimizer;
+use candle::{backprop::GradStore, Var};
 
 #[derive(Clone, Debug)]
 pub struct ParamsAdamW {
@@ -108,16 +30,18 @@ struct VarAdamW {
 }
 
 #[derive(Debug)]
+#[deprecated(note = "use NAdamW instead")]
 pub struct AdamW {
     vars: Vec<VarAdamW>,
     step_t: usize,
     params: ParamsAdamW,
 }
 
+#[allow(deprecated)]
 impl Optimizer for AdamW {
     type Config = ParamsAdamW;
 
-    fn new(vars: Vec<Var>, params: ParamsAdamW) -> Result<Self> {
+    fn new(vars: Vec<Var>, params: ParamsAdamW) -> candle::Result<Self> {
         let vars = vars
             .into_iter()
             .filter(|var| var.dtype().is_float())
@@ -133,7 +57,7 @@ impl Optimizer for AdamW {
                     second_moment,
                 })
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<candle::Result<Vec<_>>>()?;
         Ok(Self {
             vars,
             params,
@@ -141,19 +65,9 @@ impl Optimizer for AdamW {
         })
     }
 
-    fn learning_rate(&self) -> f64 {
-        self.params.lr
-    }
-
-    fn set_learning_rate(&mut self, lr: f64) {
-        self.params.lr = lr
-    }
-
-    fn step(&mut self, grads: &candle::backprop::GradStore) -> Result<()> {
+    fn step(&mut self, grads: &GradStore) -> candle::Result<()> {
         self.step_t += 1;
         let lr = self.params.lr;
-        let lambda = self.params.weight_decay;
-        let lr_lambda = lr * lambda;
         let beta1 = self.params.beta1;
         let beta2 = self.params.beta2;
         let scale_m = 1f64 / (1f64 - beta1.powi(self.step_t as i32));
@@ -170,7 +84,12 @@ impl Optimizer for AdamW {
                 let next_v = ((v.as_tensor() * beta2)? + (g.sqr()? * (1.0 - beta2))?)?;
                 let m_hat = (&next_m * scale_m)?;
                 let v_hat = (&next_v * scale_v)?;
-                let next_theta = (theta.as_tensor() * (1f64 - lr_lambda))?;
+                let next_theta = if let Some(decay) = var.var.optimizer_hint().get_decay(self.params.weight_decay) {
+                    let lr_lambda = lr * decay;
+                    (theta.as_tensor() * (1f64 - lr_lambda))?
+                } else {
+                    theta.as_tensor().clone()
+                };
                 let adjusted_grad = (m_hat / (v_hat.sqrt()? + self.params.eps)?)?;
                 let next_theta = (next_theta - (adjusted_grad * lr)?)?;
                 m.set(&next_m)?;
@@ -180,10 +99,19 @@ impl Optimizer for AdamW {
         }
         Ok(())
     }
+
+    fn learning_rate(&self) -> f64 {
+        self.params.lr
+    }
+
+    fn set_learning_rate(&mut self, lr: f64) {
+        self.params.lr = lr
+    }
 }
 
+#[allow(deprecated)]
 impl AdamW {
-    pub fn new_lr(vars: Vec<Var>, learning_rate: f64) -> Result<Self> {
+    pub fn new_lr(vars: Vec<Var>, learning_rate: f64) -> candle::Result<Self> {
         let params = ParamsAdamW {
             lr: learning_rate,
             ..ParamsAdamW::default()

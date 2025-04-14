@@ -1,7 +1,7 @@
 //! A `VarMap` is a store that holds named variables.
 //!
 use candle::{DType, Device, Result, Shape, Tensor, Var};
-use std::collections::HashMap;
+use ahash::*;
 use std::sync::{Arc, Mutex};
 
 /// A `VarMap` is a store that holds named variables. Variables can be retrieved from the stores
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 /// `VarMap` structures can be serialized in the safetensors format.
 #[derive(Clone)]
 pub struct VarMap {
-    data: Arc<Mutex<HashMap<String, Var>>>,
+    data: Arc<Mutex<HashMap<candle::tweaks::ArcStr, Var>>>,
 }
 
 impl VarMap {
@@ -111,11 +111,24 @@ impl VarMap {
         }
         let var = init.var(shape, dtype, device)?;
         let tensor = var.as_tensor().clone();
-        tensor_data.insert(path.to_string(), var);
+        tensor_data.insert(path.into(), var);
         Ok(tensor)
     }
 
-    pub fn data(&self) -> &Mutex<HashMap<String, Var>> {
+    pub fn data(&self) -> &Mutex<HashMap<candle::tweaks::ArcStr, Var>> {
         &self.data
+    }
+
+    pub fn put_tensor(&self, name: &str, tensor: Tensor, as_var: bool) -> Result<Tensor> {
+        if as_var {
+            let mut inner = self.data.lock().unwrap();
+            let var = Var::from_tensor(&tensor)?;
+            let tensor = var.as_tensor().clone();
+            inner.insert(name.into(), var);
+            Ok(tensor)
+        } else {
+            // not supported serialization
+            Ok(tensor)
+        }
     }
 }

@@ -5,7 +5,7 @@
 use super::{GgmlDType, QTensor};
 use crate::{Context, Device, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 
 pub const DEFAULT_ALIGNMENT: u64 = 32;
 
@@ -334,7 +334,7 @@ impl Value {
                     // Doesn't matter, the array is empty.
                     ValueType::U32
                 } else {
-                    let value_type: std::collections::HashSet<_> =
+                    let value_type: HashSet<_> =
                         v.iter().map(|elem| elem.value_type()).collect();
                     if value_type.len() != 1 {
                         crate::bail!("multiple value-types in the same array {value_type:?}")

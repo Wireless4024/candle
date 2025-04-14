@@ -7,9 +7,12 @@
 //! running stats.
 //!
 //! [`Batch Normalization`]: https://arxiv.org/abs/1502.03167
-use candle::{DType, Result, Tensor, Var};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::borrow::Cow;
+use candle::{DType, Result, Tensor, Var};
+use crate::VarBuilder;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct BatchNormConfig {
     pub eps: f64,
     pub remove_mean: bool,
@@ -326,3 +329,31 @@ pub fn batch_norm<C: Into<BatchNormConfig>>(
         momentum: config.momentum,
     })
 }
+
+// --
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Copy)]
+pub struct BatchNormConfigWrapper {
+    pub features: usize,
+    #[serde(flatten)]
+    pub inner: BatchNormConfig,
+}
+
+impl crate::tweaks::SerializableModule for BatchNorm {
+    type Config = BatchNormConfigWrapper;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: VarBuilder) -> std::result::Result<Self, candle::Error> {
+        batch_norm(config.features, config.inner, vb)
+    }
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(BatchNormConfigWrapper {
+            features: self.running_mean.as_tensor().dim(0).unwrap(),
+            inner: BatchNormConfig {
+                eps: self.eps,
+                momentum: self.momentum,
+                remove_mean: self.remove_mean,
+                affine: self.weight_and_bias.is_some(),
+            },
+        })
+    }
+}
+

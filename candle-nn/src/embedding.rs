@@ -1,4 +1,6 @@
 //! Embedding Layer.
+
+use std::borrow::Cow;
 use candle::{Result, Tensor};
 
 #[derive(Clone, Debug)]
@@ -37,6 +39,7 @@ impl crate::Module for Embedding {
 }
 
 pub fn embedding(in_size: usize, out_size: usize, vb: crate::VarBuilder) -> Result<Embedding> {
+    let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::with_decay_multiplier(0.02));
     let embeddings = vb.get_with_hints(
         (in_size, out_size),
         "weight",
@@ -46,4 +49,32 @@ pub fn embedding(in_size: usize, out_size: usize, vb: crate::VarBuilder) -> Resu
         },
     )?;
     Ok(Embedding::new(embeddings, out_size))
+}
+
+// --
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct EmbeddingConfig {
+    pub vocab_size: usize,
+    pub hidden_size: usize,
+}
+
+impl crate::tweaks::SerializableModule for Embedding {
+    type Config = EmbeddingConfig;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: crate::VarBuilder) -> std::result::Result<Self, candle::Error> {
+        embedding(config.vocab_size, config.hidden_size, vb)
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(EmbeddingConfig {
+            vocab_size: self.embeddings.shape().dims()[0],
+            hidden_size: self.hidden_size,
+        })
+    }
+}
+
+impl candle::tweaks::ParameterCount for Embedding {
+    fn parameter_count(&self) -> usize {
+        self.embeddings.parameter_count()
+    }
 }

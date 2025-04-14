@@ -5,9 +5,8 @@ pub use cudarc;
 use cudarc::driver::CudaFunction;
 use float8::F8E4M3;
 use half::{bf16, f16};
-use std::collections::HashMap;
+use ahash::*;
 use std::sync::{Arc, Mutex};
-
 use super::{CudaError, CudaStorage, CudaStorageSlice, WrapErr};
 
 /// Unique identifier for cuda devices.
@@ -34,11 +33,18 @@ pub struct ModuleStore {
 pub struct CudaDevice {
     id: DeviceId,
     context: Arc<cudarc::driver::CudaContext>,
-    modules: Arc<std::sync::RwLock<ModuleStore>>,
+    modules: Modules,
     custom_modules: Arc<std::sync::RwLock<HashMap<String, Arc<cudarc::driver::CudaModule>>>>,
     stream: Arc<cudarc::driver::CudaStream>,
     pub(crate) blas: Arc<cudarc::cublas::CudaBlas>,
     curand: Arc<Mutex<CudaRng>>,
+}
+
+#[derive(Clone)]
+enum Modules {
+    Lazy(Arc<std::sync::RwLock<ModuleStore>>),
+    // hardcoded to prevent error if size change, please check initialization if this error
+    Eager(Arc<[Arc<cudarc::driver::CudaModule>; 11]>),
 }
 
 impl std::fmt::Debug for CudaDevice {
@@ -156,6 +162,46 @@ impl CudaDevice {
     pub fn cuda_stream(&self) -> Arc<cudarc::driver::CudaStream> {
         self.stream.clone()
     }
+    pub fn preload_modules(&mut self) -> crate::Result<()> {
+        println!("Preloading kernels...");
+        log::info!("compiling affine..");
+        let affine = self.context.load_module(candle_kernels::AFFINE.ptx().into()).w()?;
+        log::info!("compiling binary..");
+        let binary = self.context.load_module(candle_kernels::BINARY.ptx().into()).w()?;
+        log::info!("compiling cast..");
+        let cast = self.context.load_module(candle_kernels::CAST.ptx().into()).w()?;
+        log::info!("compiling conv..");
+        let conv = self.context.load_module(candle_kernels::CONV.ptx().into()).w()?;
+        log::info!("compiling fill..");
+        let fill = self.context.load_module(candle_kernels::FILL.ptx().into()).w()?;
+        log::info!("compiling indexing..");
+        let indexing = self.context.load_module(candle_kernels::INDEXING.ptx().into()).w()?;
+        log::info!("compiling quantized..");
+        let quantized = self.context.load_module(candle_kernels::QUANTIZED.ptx().into()).w()?;
+        log::info!("compiling reduce..");
+        let reduce = self.context.load_module(candle_kernels::REDUCE.ptx().into()).w()?;
+        log::info!("compiling sort..");
+        let sort = self.context.load_module(candle_kernels::SORT.ptx().into()).w()?;
+        log::info!("compiling ternary..");
+        let ternary = self.context.load_module(candle_kernels::TERNARY.ptx().into()).w()?;
+        log::info!("compiling unary..");
+        let unary = self.context.load_module(candle_kernels::UNARY.ptx().into()).w()?;
+        log::info!("compiling done");
+        self.modules = Modules::Eager(Arc::new([
+            affine,
+            binary,
+            cast,
+            conv,
+            fill,
+            indexing,
+            quantized,
+            reduce,
+            sort,
+            ternary,
+            unary,
+        ]));
+        Ok(())
+    }
 
     pub fn cublas_handle(&self) -> Arc<cudarc::cublas::CudaBlas> {
         self.blas.clone()
@@ -190,6 +236,10 @@ impl CudaDevice {
         let cuda_code = String::from_utf8(buf)?;
         let opts = cudarc::nvrtc::CompileOptions {
             use_fast_math: Some(true),
+            options: vec![
+                "--dopt=on".to_string(),
+                "--extra-device-vectorization".to_string(),
+            ],
             ..Default::default()
         };
         let ptx = cudarc::nvrtc::safe::compile_ptx_with_opts(cuda_code, opts).w()?;
@@ -231,23 +281,36 @@ impl CudaDevice {
     }
 
     pub fn get_or_load_func(&self, fn_name: &str, mdl: &kernels::Module) -> Result<CudaFunc> {
-        let ms = self.modules.read().unwrap();
-        if let Some(mdl) = ms.mdls[mdl.index()].as_ref() {
-            let func = mdl.load_function(fn_name).w()?;
-            return Ok(CudaFunc {
-                func,
-                stream: self.stream.clone(),
-            });
+        match &self.modules {
+            Modules::Lazy(lazy) => {
+                let ms = lazy.read().unwrap();
+                if let Some(mdl) = ms.mdls[mdl.index()].as_ref() {
+                    let func = mdl.load_function(fn_name).w()?;
+                    return Ok(CudaFunc {
+                        func,
+                        stream: self.stream.clone(),
+                    });
+                }
+                drop(ms);
+                let mut ms = lazy.write().unwrap();
+                let cuda_module = self.context.load_module(mdl.ptx().into()).w()?;
+                ms.mdls[mdl.index()] = Some(cuda_module.clone());
+                let func = cuda_module.load_function(fn_name).w()?;
+                Ok(CudaFunc {
+                    func,
+                    stream: self.stream.clone(),
+                })
+            }
+            // bypass mutex if all modules are preloaded
+            Modules::Eager(mdls) => {
+                let mdl = &mdls[mdl.index()];
+                let func = mdl.load_function(fn_name).w()?;
+                Ok(CudaFunc {
+                    func,
+                    stream: self.stream.clone(),
+                })
+            }
         }
-        drop(ms);
-        let mut ms = self.modules.write().unwrap();
-        let cuda_module = self.context.load_module(mdl.ptx().into()).w()?;
-        ms.mdls[mdl.index()] = Some(cuda_module.clone());
-        let func = cuda_module.load_function(fn_name).w()?;
-        Ok(CudaFunc {
-            func,
-            stream: self.stream.clone(),
-        })
     }
 }
 
@@ -266,7 +329,7 @@ impl CudaDevice {
             stream,
             blas: Arc::new(blas),
             curand: Arc::new(Mutex::new(CudaRng(curand))),
-            modules: Arc::new(std::sync::RwLock::new(module_store)),
+            modules: Modules::Lazy(Arc::new(std::sync::RwLock::new(module_store))),
             custom_modules: Arc::new(std::sync::RwLock::new(HashMap::new())),
         })
     }
@@ -289,7 +352,7 @@ impl BackendDevice for CudaDevice {
             stream,
             blas: Arc::new(blas),
             curand: Arc::new(Mutex::new(CudaRng(curand))),
-            modules: Arc::new(std::sync::RwLock::new(module_store)),
+            modules: Modules::Lazy(Arc::new(std::sync::RwLock::new(module_store))),
             custom_modules: Arc::new(std::sync::RwLock::new(HashMap::new())),
         })
     }
@@ -318,6 +381,10 @@ impl BackendDevice for CudaDevice {
             DType::U8 => {
                 let data = self.alloc_zeros::<u8>(elem_count)?;
                 CudaStorageSlice::U8(data)
+            }
+            DType::U16 => {
+                let data = self.alloc_zeros::<u16>(elem_count)?;
+                CudaStorageSlice::U16(data)
             }
             DType::U32 => {
                 let data = self.alloc_zeros::<u32>(elem_count)?;
@@ -360,7 +427,7 @@ impl BackendDevice for CudaDevice {
         let slice = match dtype {
             // TODO: Add support for F16 and BF16 though this is likely to require some upstream
             // cudarc changes.
-            DType::U8 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 | DType::F8E4M3 => {
+            DType::U8 | DType::U16 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 | DType::F8E4M3 => {
                 Err(CudaError::UnsupportedDtype {
                     dtype,
                     op: "rand_uniform",
@@ -404,7 +471,7 @@ impl BackendDevice for CudaDevice {
             elem_count
         };
         let slice = match dtype {
-            DType::U8 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 | DType::F8E4M3 => {
+            DType::U8 | DType::U16 | DType::U32 | DType::I64 | DType::F16 | DType::BF16 | DType::F8E4M3 => {
                 Err(CudaError::UnsupportedDtype {
                     dtype,
                     op: "rand_normal",
@@ -437,6 +504,10 @@ impl BackendDevice for CudaDevice {
             DType::U8 => {
                 let data = self.alloc::<u8>(elem_count)?;
                 CudaStorageSlice::U8(data)
+            }
+            DType::U16 => {
+                let data = self.alloc::<u16>(elem_count)?;
+                CudaStorageSlice::U16(data)
             }
             DType::U32 => {
                 let data = self.alloc::<u32>(elem_count)?;
@@ -479,6 +550,10 @@ impl BackendDevice for CudaDevice {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U8(data)
             }
+            CpuStorageRef::U16(storage) => {
+                let data = self.memcpy_stod(storage)?;
+                CudaStorageSlice::U16(data)
+            }
             CpuStorageRef::U32(storage) => {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U32(data)
@@ -520,6 +595,10 @@ impl BackendDevice for CudaDevice {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U8(data)
             }
+            CpuStorage::U16(storage) => {
+                let data = self.memcpy_stod(storage)?;
+                CudaStorageSlice::U16(data)
+            }
             CpuStorage::U32(storage) => {
                 let data = self.memcpy_stod(storage)?;
                 CudaStorageSlice::U32(data)
@@ -560,6 +639,10 @@ impl BackendDevice for CudaDevice {
             CpuStorage::U8(storage) => {
                 let data = self.memcpy_stod(&storage)?;
                 CudaStorageSlice::U8(data)
+            }
+            CpuStorage::U16(storage) => {
+                let data = self.memcpy_stod(&storage)?;
+                CudaStorageSlice::U16(data)
             }
             CpuStorage::U32(storage) => {
                 let data = self.memcpy_stod(&storage)?;

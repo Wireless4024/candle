@@ -8,7 +8,7 @@ use candle::{DType, Device, Result, Shape, Tensor, Var};
 /// the magnitude of the variance of the weights in the
 /// forward pass, choosing `FanOut` preserves this
 /// magnitude in the backward pass.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FanInOut {
     FanIn,
     FanOut,
@@ -40,7 +40,7 @@ impl FanInOut {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Deserialize, serde::Serialize)]
 pub enum NormalOrUniform {
     Normal,
     Uniform,
@@ -48,7 +48,7 @@ pub enum NormalOrUniform {
 
 /// The non-linear function that follows this layer. ReLU is the
 /// recommended value.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Deserialize, serde::Serialize)]
 pub enum NonLinearity {
     ReLU,
     Linear,
@@ -72,7 +72,7 @@ impl NonLinearity {
 }
 
 /// Variable initializations.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Init {
     /// Constant value.
     Const(f64),

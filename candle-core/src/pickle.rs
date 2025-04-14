@@ -3,7 +3,7 @@
 // composable/tensor agnostic at some point.
 use crate::{Context, DType, Error as E, Layout, Result, Tensor};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 use std::io::BufRead;
 
 const VERBOSE: bool = false;
@@ -544,7 +544,7 @@ impl Stack {
                 let mut objs = self.pop_to_marker()?;
                 let pydict = self.last()?;
                 if let Object::Dict(d) = pydict {
-                    if objs.len() % 2 != 0 {
+                    if !objs.len().is_multiple_of(2) {
                         crate::bail!("setitems: not an even number of objects")
                     }
                     while let Some(value) = objs.pop() {
@@ -564,7 +564,7 @@ impl Stack {
             OpCode::Dict => {
                 let mut objs = self.pop_to_marker()?;
                 let mut pydict = vec![];
-                if objs.len() % 2 != 0 {
+                if !objs.len().is_multiple_of(2) {
                     crate::bail!("setitems: not an even number of objects")
                 }
                 while let Some(value) = objs.pop() {

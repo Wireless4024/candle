@@ -1,3 +1,5 @@
+#![allow(incomplete_features)]
+#![feature(specialization)]
 //! candle-nn
 //!
 //! ## Other Crates
@@ -36,6 +38,7 @@ pub mod sampling;
 pub mod sequential;
 pub mod var_builder;
 pub mod var_map;
+pub mod tweaks;
 
 pub use activation::{prelu, Activation, PReLU};
 pub use batch_norm::{batch_norm, BatchNorm, BatchNormConfig};
@@ -53,7 +56,7 @@ pub use layer_norm::{
 };
 pub use linear::{linear, linear_b, linear_no_bias, Linear};
 pub use ops::Dropout;
-pub use optim::{AdamW, Optimizer, ParamsAdamW, SGD};
+pub use optim::{AdamW, Optimizer, ParamsAdamW};
 pub use rnn::{gru, lstm, GRUConfig, LSTMConfig, GRU, LSTM, RNN};
 pub use sequential::{seq, Sequential};
 pub use var_builder::VarBuilder;

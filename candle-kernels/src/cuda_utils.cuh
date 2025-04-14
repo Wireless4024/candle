@@ -156,6 +156,8 @@ __device__ __forceinline__ int64_t ming(int64_t a, int64_t b) { return min(a, b)
 __device__ __forceinline__ int64_t maxg(int64_t a, int64_t b) { return max(a, b); }
 __device__ __forceinline__ uint32_t ming(uint32_t a, uint32_t b) { return min(a, b); }
 __device__ __forceinline__ uint32_t maxg(uint32_t a, uint32_t b) { return max(a, b); }
+__device__ __forceinline__ uint16_t ming(uint16_t a, uint16_t b) { return min(a, b); }
+__device__ __forceinline__ uint16_t maxg(uint16_t a, uint16_t b) { return max(a, b); }
 __device__ __forceinline__ uint8_t ming(uint8_t a, uint8_t b) { return min(a, b); }
 __device__ __forceinline__ uint8_t maxg(uint8_t a, uint8_t b) { return max(a, b); }
 #if __CUDA_ARCH__ >= 530

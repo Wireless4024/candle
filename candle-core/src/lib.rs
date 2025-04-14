@@ -1,3 +1,11 @@
+#![feature(likely_unlikely)]
+#![feature(ptr_as_ref_unchecked)]
+#![feature(stdarch_x86_avx512_f16)]
+#![feature(specialization)]
+#![feature(sync_unsafe_cell)]
+#![feature(mapped_lock_guards)]
+#![allow(incomplete_features)]
+
 //! ML framework for Rust
 //!
 //! ```rust
@@ -86,6 +94,7 @@ mod tensor_cat;
 pub mod test_utils;
 pub mod utils;
 mod variable;
+pub mod tweaks;
 
 #[cfg(feature = "cudnn")]
 pub use cuda_backend::cudnn;
@@ -117,6 +126,7 @@ pub use metal_backend::{MetalDevice, MetalError, MetalStorage};
 
 #[cfg(not(feature = "metal"))]
 pub use dummy_metal_backend::{MetalDevice, MetalError, MetalStorage};
+use crate::tweaks::flags::is_training;
 
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
@@ -164,10 +174,28 @@ impl<M: Module> Module for Option<&M> {
 /// separate the training and evaluation behaviors.
 pub trait ModuleT {
     fn forward_t(&self, xs: &Tensor, train: bool) -> Result<Tensor>;
+    fn forward_(&self, xs: &Tensor) -> Result<Tensor> {
+        self.forward_t(xs, is_training())
+    }
 }
 
 impl<M: Module> ModuleT for M {
-    fn forward_t(&self, xs: &Tensor, _train: bool) -> Result<Tensor> {
+    default fn forward_t(&self, xs: &Tensor, _train: bool) -> Result<Tensor> {
         self.forward(xs)
+    }
+}
+
+const _: Option<Box<dyn ModuleT>> = None;
+
+pub trait CustomForward<T, R> {
+    fn custom_forward(&self, xs: &T) -> Result<R> {
+        self.custom_forward_t(xs, is_training())
+    }
+    fn custom_forward_t(&self, xs: &T, train:bool) -> Result<R>;
+}
+
+impl<M: ModuleT> CustomForward<Tensor, Tensor> for M {
+    fn custom_forward_t(&self, xs: &Tensor, train: bool) -> Result<Tensor> {
+        self.forward_t(xs, train)
     }
 }

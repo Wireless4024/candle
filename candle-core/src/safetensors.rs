@@ -12,15 +12,17 @@
 use crate::{DType, Device, Error, Result, Tensor, WithDType};
 use float8::F8E4M3;
 use safetensors::tensor as st;
-use safetensors::tensor::SafeTensors;
+use safetensors::tensor::{Metadata, SafeTensors};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::hash::BuildHasher;
+use ahash::*;
 use std::path::Path;
 
 impl From<DType> for st::Dtype {
     fn from(value: DType) -> Self {
         match value {
             DType::U8 => st::Dtype::U8,
+            DType::U16 => st::Dtype::U16,
             DType::U32 => st::Dtype::U32,
             DType::I64 => st::Dtype::I64,
             DType::BF16 => st::Dtype::BF16,
@@ -37,6 +39,7 @@ impl TryFrom<st::Dtype> for DType {
     fn try_from(value: st::Dtype) -> Result<Self> {
         match value {
             st::Dtype::U8 => Ok(DType::U8),
+            st::Dtype::U16 => Ok(DType::U16),
             st::Dtype::U32 => Ok(DType::U32),
             st::Dtype::I64 => Ok(DType::I64),
             st::Dtype::BF16 => Ok(DType::BF16),
@@ -200,6 +203,7 @@ impl Tensor {
     ) -> Result<Self> {
         match dtype {
             DType::U8 => convert_slice::<u8>(data, shape, device),
+            DType::U16 => convert_slice::<u16>(data, shape, device),
             DType::U32 => convert_slice::<u32>(data, shape, device),
             DType::I64 => convert_slice::<i64>(data, shape, device),
             DType::BF16 => convert_slice::<half::bf16>(data, shape, device),
@@ -241,6 +245,7 @@ fn convert_back(tensor: &Tensor) -> Result<Vec<u8>> {
     let tensor = tensor.flatten_all()?;
     match tensor.dtype() {
         DType::U8 => Ok(convert_back_::<u8>(tensor.to_vec1()?)),
+        DType::U16 => Ok(convert_back_::<u16>(tensor.to_vec1()?)),
         DType::U32 => Ok(convert_back_::<u32>(tensor.to_vec1()?)),
         DType::I64 => Ok(convert_back_::<i64>(tensor.to_vec1()?)),
         DType::F16 => Ok(convert_back_::<half::f16>(tensor.to_vec1()?)),
@@ -264,15 +269,15 @@ pub fn load_buffer(data: &[u8], device: &Device) -> Result<HashMap<String, Tenso
         .collect()
 }
 
-pub fn save<K: AsRef<str> + Ord + std::fmt::Display, P: AsRef<Path>>(
-    tensors: &HashMap<K, Tensor>,
+pub fn save<K: AsRef<str> + Ord + std::fmt::Display, P: AsRef<Path>, H: BuildHasher>(
+    tensors: &std::collections::HashMap<K, Tensor, H>,
     filename: P,
 ) -> Result<()> {
     Ok(st::serialize_to_file(tensors, None, filename.as_ref())?)
 }
 
 #[derive(yoke::Yokeable)]
-struct SafeTensors_<'a>(SafeTensors<'a>);
+struct SafeTensors_<'a>(SafeTensors<'a>, st::Metadata);
 
 pub struct MmapedSafetensors {
     safetensors: Vec<yoke::Yoke<SafeTensors_<'static>, memmap2::Mmap>>,
@@ -296,7 +301,8 @@ impl MmapedSafetensors {
             |data: &[u8]| {
                 let st = safetensors::SafeTensors::deserialize(data)
                     .map_err(|e| Error::from(e).with_path(p))?;
-                Ok::<_, Error>(SafeTensors_(st))
+                let (_, metadata) = st::SafeTensors::read_metadata(data)?;
+                Ok::<_, Error>(SafeTensors_(st,metadata))
             },
         )?;
         Ok(Self {
@@ -326,7 +332,8 @@ impl MmapedSafetensors {
                 |data: &[u8]| {
                     let st = safetensors::SafeTensors::deserialize(data)
                         .map_err(|e| Error::from(e).with_path(p))?;
-                    Ok::<_, Error>(SafeTensors_(st))
+                    let (_, metadata) = st::SafeTensors::read_metadata(data)?;
+                    Ok::<_, Error>(SafeTensors_(st, metadata))
                 },
             )?;
             for k in data.get().0.names() {
@@ -367,17 +374,25 @@ impl MmapedSafetensors {
         };
         Ok(self.safetensors[index].get().0.tensor(name)?)
     }
+
+    pub fn metadata(&self) -> impl Iterator<Item=(&String, &String)> {
+        self.safetensors.iter()
+            .filter_map(|x| x.get().1.metadata().as_ref())
+            .flat_map(|safetensors| safetensors.iter())
+    }
 }
 
 pub struct SliceSafetensors<'a> {
     safetensors: SafeTensors<'a>,
+    metadata: Metadata,
 }
 
 impl<'a> SliceSafetensors<'a> {
     /// Creates a wrapper around a binary buffer and deserialize the safetensors header.
     pub fn new(buffer: &'a [u8]) -> Result<Self> {
         let safetensors = safetensors::SafeTensors::deserialize(buffer)?;
-        Ok(Self { safetensors })
+        let (_, metadata) = safetensors::SafeTensors::read_metadata(buffer)?;
+        Ok(Self { safetensors, metadata })
     }
 
     pub fn load(&self, name: &str, dev: &Device) -> Result<Tensor> {
@@ -390,6 +405,10 @@ impl<'a> SliceSafetensors<'a> {
 
     pub fn get(&self, name: &str) -> Result<st::TensorView<'_>> {
         Ok(self.safetensors.tensor(name)?)
+    }
+    
+    pub fn metadata(&self) -> impl Iterator<Item=(&String, &String)> {
+        self.metadata.metadata().as_ref().into_iter().flat_map(|x| x.iter())
     }
 }
 
@@ -404,7 +423,8 @@ impl BufferedSafetensors {
             buffer,
             |data: &[u8]| {
                 let st = safetensors::SafeTensors::deserialize(data)?;
-                Ok::<_, Error>(SafeTensors_(st))
+                let (_, metadata) = st::SafeTensors::read_metadata(data)?;
+                Ok::<_, Error>(SafeTensors_(st, metadata))
             },
         )?;
         Ok(Self { safetensors })
@@ -457,7 +477,6 @@ impl MmapedFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn save_single_tensor() {
