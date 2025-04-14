@@ -4,7 +4,7 @@
 use super::{GgmlDType, QTensor};
 use crate::{Context, Device, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 
 pub const DEFAULT_ALIGNMENT: u64 = 32;
 
@@ -62,7 +62,7 @@ impl TensorInfo {
     ) -> Result<QTensor> {
         let tensor_elems = self.shape.elem_count();
         let block_size = self.ggml_dtype.block_size();
-        if tensor_elems % block_size != 0 {
+        if !tensor_elems.is_multiple_of(block_size) {
             crate::bail!(
             "the number of elements {tensor_elems} is not divisible by the block size {block_size}"
         )
@@ -333,7 +333,7 @@ impl Value {
                     // Doesn't matter, the array is empty.
                     ValueType::U32
                 } else {
-                    let value_type: std::collections::HashSet<_> =
+                    let value_type: HashSet<_> =
                         v.iter().map(|elem| elem.value_type()).collect();
                     if value_type.len() != 1 {
                         crate::bail!("multiple value-types in the same array {value_type:?}")

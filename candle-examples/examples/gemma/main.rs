@@ -16,6 +16,7 @@ use candle_examples::token_output_stream::TokenOutputStream;
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use hf_hub::{api::sync::Api, Repo, RepoType};
+use hf_hub::api::sync::ApiBuilder;
 use tokenizers::Tokenizer;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -205,7 +206,7 @@ struct Args {
     seed: u64,
 
     /// The length of the sample to generate (in tokens).
-    #[arg(long, short = 'n', default_value_t = 10000)]
+    #[arg(long, short = 'n', default_value_t = 10)]
     sample_len: usize,
 
     #[arg(long)]
@@ -232,7 +233,7 @@ struct Args {
     repeat_last_n: usize,
 
     /// The model to use.
-    #[arg(long, default_value = "2-2b")]
+    #[arg(long, default_value = "3-1b-it")]
     which: Which,
 
     #[arg(long)]
@@ -266,7 +267,7 @@ fn main() -> Result<()> {
     );
 
     let start = std::time::Instant::now();
-    let api = Api::new()?;
+    let api = ApiBuilder::new().build()?;
     let model_id = match &args.model_id {
         Some(model_id) => model_id.to_string(),
         None => match args.which {

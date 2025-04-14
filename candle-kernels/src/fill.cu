@@ -9,6 +9,7 @@ __device__ void fill_with(T *buf, T value, const size_t numel) {
     }
 }
 extern "C" __global__ void fill_u8(uint8_t *buf, uint8_t value, const size_t numel) { fill_with(buf, value, numel); }
+extern "C" __global__ void fill_u16(uint16_t *buf, uint16_t value, const size_t numel) { fill_with(buf, value, numel); }
 extern "C" __global__ void fill_u32(uint32_t *buf, uint32_t value, const size_t numel) { fill_with(buf, value, numel); }
 extern "C" __global__ void fill_i64(int64_t *buf, int64_t value, const size_t numel) { fill_with(buf, value, numel); }
 extern "C" __global__ void fill_f32(float *buf, float value, const size_t numel) { fill_with(buf, value, numel); }
@@ -34,6 +35,7 @@ void FNNAME(const TYPENAME *src, TYPENAME *dst, uint32_t d1, uint32_t d2, uint32
 COPY2D_OP(float, copy2d_f32)
 COPY2D_OP(double, copy2d_f64)
 COPY2D_OP(uint8_t, copy2d_u8)
+COPY2D_OP(uint16_t, copy2d_u16)
 COPY2D_OP(uint32_t, copy2d_u32)
 COPY2D_OP(int64_t, copy2d_i64)
 
@@ -63,6 +65,7 @@ extern "C" __global__ void FN_NAME( \
 CONST_SET_OP(float, const_set_f32)
 CONST_SET_OP(double, const_set_f64)
 CONST_SET_OP(uint8_t, const_set_u8)
+CONST_SET_OP(uint16_t, const_set_u16)
 CONST_SET_OP(uint32_t, const_set_u32)
 CONST_SET_OP(int64_t, const_set_i64)
 
