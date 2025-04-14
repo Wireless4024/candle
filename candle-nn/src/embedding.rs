@@ -37,6 +37,7 @@ impl crate::Module for Embedding {
 }
 
 pub fn embedding(in_size: usize, out_size: usize, vb: crate::VarBuilder) -> Result<Embedding> {
+    let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::with_decay_multiplier(0.02));
     let embeddings = vb.get_with_hints(
         (in_size, out_size),
         "weight",

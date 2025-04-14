@@ -41,6 +41,7 @@ impl HiddenActLayer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 enum PositionEmbeddingType {
     #[default]
     Absolute,
@@ -333,7 +334,7 @@ impl DebertaV2DisentangledSelfAttention {
         let config = config.clone();
         let vb = vb.clone();
 
-        if config.hidden_size % config.num_attention_heads != 0 {
+        if !config.hidden_size.is_multiple_of(config.num_attention_heads) {
             return Err(candle::Error::Msg(format!(
                 "The hidden size {} is not a multiple of the number of attention heads {}",
                 config.hidden_size, config.num_attention_heads

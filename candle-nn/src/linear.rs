@@ -83,7 +83,10 @@ impl super::Module for Linear {
 /// This uses some default names for weights and biases, namely `"weight"` and `"bias"`.
 pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     let init_ws = crate::init::DEFAULT_KAIMING_NORMAL;
-    let ws = vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?;
+    let ws = {
+        let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::GeometryAware);
+        vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?
+    };
     let bound = 1. / (in_dim as f64).sqrt();
     let init_bs = crate::Init::Uniform {
         lo: -bound,
@@ -96,6 +99,7 @@ pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Li
 /// Create or initialize a new linear layer without biases.
 pub fn linear_no_bias(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     let init_ws = crate::init::DEFAULT_KAIMING_NORMAL;
+    let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::GeometryAware);
     let ws = vb.get_with_hints((out_dim, in_dim), "weight", init_ws)?;
     Ok(Linear::new(ws, None))
 }
