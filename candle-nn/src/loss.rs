@@ -40,7 +40,7 @@ pub fn nll(inp: &Tensor, target: &Tensor) -> Result<Tensor> {
 /// The resulting tensor is a scalar containing the average value over the batch.
 pub fn cross_entropy(inp: &Tensor, target: &Tensor) -> Result<Tensor> {
     if inp.rank() != 2 {
-        candle::bail!("cross_entropy expects an input tensor of rank 2")
+        candle::bail!("cross_entropy expects an input tensor of rank 2 found {}", inp.rank())
     }
     let inp = crate::ops::log_softmax(inp, 1)?;
     nll(&inp, target)

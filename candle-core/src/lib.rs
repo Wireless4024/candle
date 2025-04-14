@@ -1,3 +1,11 @@
+#![feature(likely_unlikely)]
+#![feature(ptr_as_ref_unchecked)]
+#![feature(stdarch_x86_avx512_f16)]
+#![feature(specialization)]
+#![feature(sync_unsafe_cell)]
+#![feature(mapped_lock_guards)]
+#![allow(incomplete_features)]
+
 //! ML framework for Rust
 //!
 //! ```rust
@@ -86,6 +94,7 @@ mod tensor_cat;
 pub mod test_utils;
 pub mod utils;
 mod variable;
+pub mod tweaks;
 
 #[cfg(feature = "cudnn")]
 pub use cuda_backend::cudnn;
@@ -167,7 +176,7 @@ pub trait ModuleT {
 }
 
 impl<M: Module> ModuleT for M {
-    fn forward_t(&self, xs: &Tensor, _train: bool) -> Result<Tensor> {
+    default fn forward_t(&self, xs: &Tensor, _train: bool) -> Result<Tensor> {
         self.forward(xs)
     }
 }

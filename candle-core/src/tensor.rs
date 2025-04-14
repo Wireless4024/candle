@@ -477,6 +477,9 @@ impl Tensor {
         is_variable: bool,
     ) -> Result<Self> {
         let shape = shape.into_shape(data.len())?;
+        if data.len() < shape.elem_count() {
+            bail!("data length is less than the shape, expecting {} (for {shape:?}) got {}", shape.elem_count(), data.len());
+        }
         let storage = device.storage_owned(data)?;
         let none = BackpropOp::none();
         Ok(from_storage(storage, shape, none, is_variable))
@@ -522,6 +525,9 @@ impl Tensor {
         device: &Device,
     ) -> Result<Self> {
         let shape = shape.into_shape(array.len())?;
+        if array.len() < shape.elem_count() {
+            bail!("data length is less than the shape, expecting {} (for {shape:?}) got {}", shape.elem_count(), array.len());
+        }
         let storage = device.storage_from_slice(array)?;
         let none = BackpropOp::none();
         Ok(from_storage(storage, shape, none, false))
@@ -2157,14 +2163,19 @@ impl Tensor {
 
     /// Compared to clone, this copies the actual storage but may fail because of running out of
     /// memory.
+    #[inline(always)]
     pub fn copy(&self) -> Result<Tensor> {
+        self.copy_as_var(false)
+    }
+
+    pub fn copy_as_var(&self, var: bool) -> Result<Tensor> {
         let op = BackpropOp::new1(self, Op::Copy);
         let tensor_ = Tensor_ {
             id: TensorId::new(),
             storage: Arc::new(RwLock::new(self.storage().try_clone(self.layout())?)),
             layout: self.layout.clone(),
             op,
-            is_variable: false,
+            is_variable: var,
             dtype: self.dtype,
             device: self.device.clone(),
         };
@@ -2302,6 +2313,14 @@ impl Tensor {
                 .copy_strided_src(&mut storage, 0, self.layout())?;
             let op = BackpropOp::new1(self, Op::Copy);
             Ok(from_storage(storage, shape.clone(), op, false))
+        }
+    }
+
+    pub fn contiguous_gpu(&self) -> Result<Tensor> {
+        if self.device.is_cpu() {
+            Ok(self.clone())
+        } else {
+            self.contiguous()
         }
     }
 
@@ -2753,6 +2772,17 @@ impl Tensor {
             result = result.index_select(&indices_tensor, dim)?;
         }
         Ok(result)
+    }
+
+    pub fn split<D: Dim>(&self, splits: &[usize], dim: D) -> Result<Vec<Tensor>> {
+        let dim = dim.to_index(self.shape(), "split")?;
+        let mut split_res = Vec::new();
+        let mut index = 0;
+        for split in splits {
+            split_res.push(self.narrow(dim, index, *split)?);
+            index += *split;
+        }
+        Ok(split_res)
     }
 }
 

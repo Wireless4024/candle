@@ -29,7 +29,7 @@ use crate::{DType, Device, Error, Result, Shape, Tensor};
 use byteorder::{LittleEndian, ReadBytesExt};
 use float8::F8E4M3;
 use half::{bf16, f16, slice::HalfFloatSliceExt};
-use std::collections::HashMap;
+use ahash::*;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
@@ -89,6 +89,7 @@ impl Header {
             DType::F64 => "f8",
             DType::I64 => "i8",
             DType::U32 => "u4",
+            DType::U16 => "u2",
             DType::U8 => "u1",
             DType::F8E4M3 => Err(Error::Npy("f8e4m3 is not supported".into()))?,
         };
@@ -230,6 +231,11 @@ impl Tensor {
             DType::U8 => {
                 let mut data_t = vec![0u8; elem_count];
                 reader.read_exact(&mut data_t)?;
+                Tensor::from_vec(data_t, shape, &Device::Cpu)
+            }
+            DType::U16 => {
+                let mut data_t = vec![0u16; elem_count];
+                reader.read_u16_into::<LittleEndian>(&mut data_t)?;
                 Tensor::from_vec(data_t, shape, &Device::Cpu)
             }
             DType::U32 => {

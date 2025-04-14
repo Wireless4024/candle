@@ -153,6 +153,7 @@ macro_rules! pydtype {
 
 pydtype!(i64, |v| v);
 pydtype!(u8, |v| v);
+pydtype!(u16, |v| v);
 pydtype!(u32, |v| v);
 pydtype!(f16, f32::from);
 pydtype!(bf16, f32::from);
@@ -200,6 +201,7 @@ trait MapDType {
     fn map(&self, t: &Tensor) -> PyResult<Self::Output> {
         match t.dtype() {
             DType::U8 => self.f::<u8>(t),
+            DType::U16 => self.f::<u16>(t),
             DType::U32 => self.f::<u32>(t),
             DType::I64 => self.f::<i64>(t),
             DType::BF16 => self.f::<bf16>(t),
