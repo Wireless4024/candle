@@ -3,7 +3,7 @@
 use super::{k_quants, GgmlDType, QStorage};
 use crate::{Device, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::collections::HashMap;
+use ahash::*;
 
 // https://github.com/ggerganov/llama.cpp/blob/468ea24fb4633a0d681f7ac84089566c1c6190cb/llama.h#L37
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +143,7 @@ pub fn qtensor_from_ggml(
 ) -> Result<super::QTensor> {
     let tensor_elems = dims.iter().product::<usize>();
     let block_size = ggml_dtype.block_size();
-    if tensor_elems % block_size != 0 {
+    if !tensor_elems.is_multiple_of(block_size) {
         crate::bail!(
             "the number of elements {tensor_elems} is not divisible by the block size {block_size}"
         )

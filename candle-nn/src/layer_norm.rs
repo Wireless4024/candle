@@ -141,7 +141,10 @@ pub fn layer_norm<C: Into<LayerNormConfig>>(
     vb: crate::VarBuilder,
 ) -> Result<LayerNorm> {
     let config = config.into();
-    let weight = vb.get_with_hints(size, "weight", crate::Init::Const(1.))?;
+    let weight = {
+        let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::NoDecay);
+        vb.get_with_hints(size, "weight", crate::Init::Const(1.))?
+    };
     let bias = if config.affine {
         Some(vb.get_with_hints(size, "bias", crate::Init::Const(0.))?)
     } else {

@@ -1,4 +1,7 @@
 use crate::{DType, Result};
+use candle_metal_kernels::Kernels;
+use metal::{Buffer, CommandBuffer, CommandQueue, MTLResourceOptions, NSUInteger};
+use ahash::*;
 use candle_metal_kernels::{
     metal::{
         Buffer, BufferMap, CommandBuffer, Commands, ComputePipeline, Device, MTLResourceOptions,
@@ -7,6 +10,7 @@ use candle_metal_kernels::{
 };
 use objc2_foundation::NSURL;
 use objc2_metal::{MTLCaptureDescriptor, MTLCaptureDestination, MTLCaptureManager};
+use ahash::*;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
