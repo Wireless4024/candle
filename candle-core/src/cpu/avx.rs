@@ -23,35 +23,43 @@ impl Cpu<ARR> for CurrentCpu {
         ARR
     }
 
+    #[inline(always)]
     unsafe fn zero() -> Self::Unit {
         _mm256_setzero_ps()
     }
 
+    #[inline(always)]
     unsafe fn zero_array() -> Self::Array {
         [Self::zero(); ARR]
     }
 
+    #[inline(always)]
     unsafe fn from_f32(v: f32) -> Self::Unit {
         _mm256_set1_ps(v)
     }
 
+    #[inline(always)]
     unsafe fn load(mem_addr: *const f32) -> Self::Unit {
         _mm256_loadu_ps(mem_addr)
     }
 
+    #[inline(always)]
     unsafe fn vec_add(a: Self::Unit, b: Self::Unit) -> Self::Unit {
         _mm256_add_ps(a, b)
     }
 
+    #[inline(always)]
     unsafe fn vec_fma(a: Self::Unit, b: Self::Unit, c: Self::Unit) -> Self::Unit {
         _mm256_add_ps(_mm256_mul_ps(b, c), a)
     }
 
+    #[inline(always)]
     unsafe fn vec_store(mem_addr: *mut f32, a: Self::Unit) {
         _mm256_storeu_ps(mem_addr, a);
     }
 
-    unsafe fn vec_reduce(mut x: Self::Array, y: *mut f32) {
+    #[inline(always)]
+    unsafe fn vec_reduce(mut x: [__m256; ARR], y: *mut f32) {
         for i in 0..ARR / 2 {
             x[2 * i] = _mm256_add_ps(x[2 * i], x[2 * i + 1]);
         }
