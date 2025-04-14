@@ -3,11 +3,13 @@
 //! A `VarBuilder` is used to retrieve variables used by a model. These variables can either come
 //! from a pre-trained checkpoint, e.g. using `VarBuilder::from_mmaped_safetensors`, or initialized
 //! for training, e.g. using `VarBuilder::from_varmap`.
+
+use std::hash::BuildHasher;
+use std::rc::Rc as Arc;
 use crate::VarMap;
 use candle::{safetensors::Load, DType, Device, Error, Result, Shape, Tensor};
 use safetensors::{slice::IndexOp, tensor::SafeTensors};
-use std::collections::HashMap;
-use std::sync::Arc;
+use ahash::*;
 
 /// A structure used to retrieve variables, these variables can either come from storage or be
 /// generated via some form of initialization.
@@ -15,7 +17,7 @@ use std::sync::Arc;
 /// The way to retrieve variables is defined in the backend embedded in the `VarBuilder`.
 pub struct VarBuilderArgs<'a, B: Backend> {
     data: Arc<TensorData<B>>,
-    path: Vec<String>,
+    path: Vec<candle::tweaks::ArcStr>,
     pub dtype: DType,
     _phantom: std::marker::PhantomData<&'a B>,
 }
@@ -47,7 +49,7 @@ struct TensorData<B: Backend> {
 /// Note that there is a specialized version of this trait (`SimpleBackend`) that can be used most
 /// of the time. The main restriction is that it doesn't allow for specific args (besides
 /// initialization hints).
-pub trait Backend: Send + Sync {
+pub trait Backend {
     type Hints: Default;
 
     /// Retrieve a tensor with some target shape.
@@ -66,7 +68,7 @@ pub trait Backend: Send + Sync {
     fn contains_tensor(&self, name: &str) -> bool;
 }
 
-pub trait SimpleBackend: Send + Sync {
+pub trait SimpleBackend {
     /// Retrieve a tensor based on a target name and shape.
     fn get(
         &self,
@@ -121,8 +123,8 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Returns the prefix of the `VarBuilder`.
-    pub fn prefix(&self) -> String {
-        self.path.join(".")
+    pub fn prefix(&self) -> candle::tweaks::ArcStr {
+        candle::tweaks::ArcStr::join(".", &self.path)
     }
 
     /// Returns a new `VarBuilder` using the root path.
@@ -136,10 +138,10 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Returns a new `VarBuilder` with the prefix set to `prefix`.
-    pub fn set_prefix(&self, prefix: impl ToString) -> Self {
+    pub fn set_prefix(&self, prefix: impl std::fmt::Display) -> Self {
         Self {
             data: self.data.clone(),
-            path: vec![prefix.to_string()],
+            path: vec![candle::tweaks::ArcStr::new(prefix)],
             dtype: self.dtype,
             _phantom: std::marker::PhantomData,
         }
@@ -147,9 +149,9 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
 
     /// Return a new `VarBuilder` adding `s` to the current prefix. This can be think of as `cd`
     /// into a directory.
-    pub fn push_prefix<S: ToString>(&self, s: S) -> Self {
+    pub fn push_prefix<S: std::fmt::Display>(&self, s: S) -> Self {
         let mut path = self.path.clone();
-        path.push(s.to_string());
+        path.push(candle::tweaks::ArcStr::new(s));
         Self {
             data: self.data.clone(),
             path,
@@ -159,7 +161,8 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
     }
 
     /// Short alias for `push_prefix`.
-    pub fn pp<S: ToString>(&self, s: S) -> Self {
+    #[inline(always)]
+    pub fn pp<S: std::fmt::Display>(&self, s: S) -> Self {
         self.push_prefix(s)
     }
 
@@ -183,11 +186,11 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
         }
     }
 
-    fn path(&self, tensor_name: &str) -> String {
+    fn path(&self, tensor_name: &str) -> candle::tweaks::ArcStr {
         if self.path.is_empty() {
-            tensor_name.to_string()
+            tensor_name.into()
         } else {
-            [&self.path.join("."), tensor_name].join(".")
+            candle::tweaks::ArcStr::join(".", self.path.iter().map(|x| x.as_str()).chain(Some(tensor_name)))
         }
     }
 
@@ -206,7 +209,13 @@ impl<B: Backend> VarBuilderArgs<'_, B> {
         name: &str,
         hints: B::Hints,
     ) -> Result<Tensor> {
-        self.get_with_hints_dtype(s, name, hints, self.dtype)
+        if name == "bias" {
+            // bias should not decay
+            let _kind = candle::tweaks::with_var_kind(candle::tweaks::VariableKind::NoDecay);
+            self.get_with_hints_dtype(s, name, hints, self.dtype)
+        } else {
+            self.get_with_hints_dtype(s, name, hints, self.dtype)
+        }
     }
 
     /// Retrieve the tensor associated with the given name at the current path.
@@ -285,7 +294,7 @@ impl SimpleBackend for Zeros {
     }
 }
 
-impl SimpleBackend for HashMap<String, Tensor> {
+impl<H: BuildHasher + Send + Sync> SimpleBackend for std::collections::HashMap<String, Tensor, H> {
     fn get(
         &self,
         s: Shape,
@@ -298,7 +307,7 @@ impl SimpleBackend for HashMap<String, Tensor> {
             .get(name)
             .ok_or_else(|| {
                 Error::CannotFindTensor {
-                    path: name.to_string(),
+                    path: name.into(),
                 }
                 .bt()
             })?
@@ -370,7 +379,7 @@ impl SimpleBackend for SafeTensorWithRouting<'_> {
     ) -> Result<Tensor> {
         let index = self.routing.get(path).ok_or_else(|| {
             Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt()
         })?;
@@ -419,7 +428,7 @@ impl SimpleBackend for candle::npy::NpzTensors {
     ) -> Result<Tensor> {
         let tensor = match self.get(path)? {
             None => Err(Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt())?,
             Some(tensor) => tensor,
@@ -464,7 +473,7 @@ impl SimpleBackend for candle::pickle::PthTensors {
     ) -> Result<Tensor> {
         let tensor = match self.get(path)? {
             None => Err(Error::CannotFindTensor {
-                path: path.to_string(),
+                path: path.into(),
             }
             .bt())?,
             Some(tensor) => tensor,
@@ -619,7 +628,7 @@ impl<'a> VarBuilder<'a> {
 
     /// Initializes a `VarBuilder` that retrieves tensors stored in a hashtable. An error is
     /// returned if no tensor is available under the requested path or on shape mismatches.
-    pub fn from_tensors(ts: HashMap<String, Tensor>, dtype: DType, dev: &Device) -> Self {
+    pub fn from_tensors<H: BuildHasher + Send + Sync + 'static>(ts: std::collections::HashMap<String, Tensor, H>, dtype: DType, dev: &Device) -> Self {
         Self::from_backend(Box::new(ts), dtype, dev.clone())
     }
 
@@ -808,7 +817,7 @@ impl Backend for ShardedSafeTensors {
         let mut shape = view.shape().to_vec();
         let size = shape[dim];
 
-        if size % world_size != 0 {
+        if !size.is_multiple_of(world_size) {
             return Err(Error::ShapeMismatchSplit {
                 shape: shape.into(),
                 dim,

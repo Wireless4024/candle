@@ -3,7 +3,7 @@ use cudarc;
 use cudarc::cudnn::safe::{ConvForward, Cudnn};
 use cudarc::driver::{CudaSlice, CudaView, DeviceRepr, ValidAsZeroBits};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use ahash::*;
 use std::sync::Arc;
 
 // The cudnn handles are stored per thread here rather than on the CudaDevice as they are neither

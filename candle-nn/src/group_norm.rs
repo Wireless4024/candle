@@ -1,7 +1,10 @@
 //! Group Normalization.
 //!
 //! This layer applies Group Normalization over a mini-batch of inputs.
+
+use std::borrow::Cow;
 use candle::{DType, Result, Tensor};
+use crate::VarBuilder;
 
 // This group norm version handles both weight and bias so removes the mean.
 #[derive(Clone, Debug)]
@@ -82,4 +85,34 @@ pub fn group_norm(
     let weight = vb.get_with_hints(num_channels, "weight", crate::Init::Const(1.))?;
     let bias = vb.get_with_hints(num_channels, "bias", crate::Init::Const(0.))?;
     GroupNorm::new(weight, bias, num_channels, num_groups, eps)
+}
+
+// --
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct GroupNormConfig {
+    pub num_groups: usize,
+    pub num_channels: usize,
+    pub eps: f64,
+}
+
+impl crate::tweaks::SerializableModule for GroupNorm {
+    type Config = GroupNormConfig;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, vb: VarBuilder) -> std::result::Result<Self, candle::Error> {
+        group_norm(config.num_groups, config.num_channels, config.eps, vb)
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(GroupNormConfig {
+            num_groups: self.num_groups,
+            num_channels: self.num_channels,
+            eps: self.eps,
+        })
+    }
+}
+
+impl candle::tweaks::ParameterCount for GroupNorm {
+    fn parameter_count(&self) -> usize {
+        self.weight.parameter_count() + self.bias.parameter_count()
+    }
 }

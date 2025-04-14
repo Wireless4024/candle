@@ -1,11 +1,14 @@
 //! Tensors are N-dimensional matrixes of elements using a single data type.
 #![allow(clippy::redundant_closure_call)]
+
 use crate::backend::{BackendDevice, BackendStorage};
 use crate::op::{BackpropOp, BinaryOp, CmpOp, Op, ReduceOp, UnaryOp};
 use crate::scalar::TensorOrScalar;
 use crate::shape::{Dim, Dims, ShapeWithOneHole};
 use crate::{bail, storage::Storage, DType, Device, Error, Layout, Result, Shape};
-use std::sync::{Arc, RwLock};
+use std::rc::Rc as Arc;
+use crate::tweaks::flags::is_training;
+use crate::tweaks::RefCellWrap;
 
 /// Unique identifier for tensors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -34,7 +37,7 @@ pub struct Tensor_ {
     // Ideally, we would use Arc<Storage> for tensors on which we don't plan on modifying the data
     // and Arc<Mutex<Storage>> for tensors where the data could be modified, e.g. variables but
     // that's tricky to encode in the current setup.
-    storage: Arc<RwLock<Storage>>,
+    storage: Arc<RefCellWrap<Storage>>,
     layout: Layout,
     op: BackpropOp,
     is_variable: bool,
@@ -166,7 +169,7 @@ pub(crate) fn from_storage<S: Into<Shape>>(
     let device = storage.device();
     let tensor_ = Tensor_ {
         id: TensorId::new(),
-        storage: Arc::new(RwLock::new(storage)),
+        storage: Arc::new(RefCellWrap::new(storage)),
         layout: Layout::contiguous(shape),
         op,
         is_variable,
@@ -477,6 +480,9 @@ impl Tensor {
         is_variable: bool,
     ) -> Result<Self> {
         let shape = shape.into_shape(data.len())?;
+        if data.len() < shape.elem_count() {
+            bail!("data length is less than the shape, expecting {} (for {shape:?}) got {}", shape.elem_count(), data.len());
+        }
         let storage = device.storage_owned(data)?;
         let none = BackpropOp::none();
         Ok(from_storage(storage, shape, none, is_variable))
@@ -522,6 +528,9 @@ impl Tensor {
         device: &Device,
     ) -> Result<Self> {
         let shape = shape.into_shape(array.len())?;
+        if array.len() < shape.elem_count() {
+            bail!("data length is less than the shape, expecting {} (for {shape:?}) got {}", shape.elem_count(), array.len());
+        }
         let storage = device.storage_from_slice(array)?;
         let none = BackpropOp::none();
         Ok(from_storage(storage, shape, none, false))
@@ -2171,14 +2180,19 @@ impl Tensor {
 
     /// Compared to clone, this copies the actual storage but may fail because of running out of
     /// memory.
+    #[inline(always)]
     pub fn copy(&self) -> Result<Tensor> {
+        self.copy_as_var(false)
+    }
+
+    pub fn copy_as_var(&self, var: bool) -> Result<Tensor> {
         let op = BackpropOp::new1(self, Op::Copy);
         let tensor_ = Tensor_ {
             id: TensorId::new(),
-            storage: Arc::new(RwLock::new(self.storage().try_clone(self.layout())?)),
+            storage: Arc::new(RefCellWrap::new(self.storage().try_clone(self.layout())?)),
             layout: self.layout.clone(),
             op,
-            is_variable: false,
+            is_variable: var,
             dtype: self.dtype,
             device: self.device.clone(),
         };
@@ -2238,7 +2252,7 @@ impl Tensor {
             let op = BackpropOp::new1(self, Op::ToDevice);
             let tensor_ = Tensor_ {
                 id: TensorId::new(),
-                storage: Arc::new(RwLock::new(storage)),
+                storage: Arc::new(RefCellWrap::new(storage)),
                 layout: self.layout.clone(),
                 op,
                 is_variable: false,
@@ -2316,6 +2330,14 @@ impl Tensor {
                 .copy_strided_src(&mut storage, 0, self.layout())?;
             let op = BackpropOp::new1(self, Op::Copy);
             Ok(from_storage(storage, shape.clone(), op, false))
+        }
+    }
+
+    pub fn contiguous_gpu(&self) -> Result<Tensor> {
+        if self.device.is_cpu() {
+            Ok(self.clone())
+        } else {
+            self.contiguous()
         }
     }
 
@@ -2567,16 +2589,21 @@ impl Tensor {
         m.forward(self)
     }
 
+    /// Run the `forward` method of `m` on `self`. and use flag from [crate::tweaks::flags::is_training]
+    pub fn apply_<M: crate::ModuleT>(&self, m: &M) -> Result<Self> {
+        m.forward_t(self, is_training())
+    }
+
     /// Run the `forward` method of `m` on `self`.
     pub fn apply_t<M: crate::ModuleT>(&self, m: &M, train: bool) -> Result<Self> {
         m.forward_t(self, train)
     }
 
-    pub(crate) fn storage(&self) -> std::sync::RwLockReadGuard<'_, Storage> {
+    pub(crate) fn storage(&self) -> std::cell::Ref<'_, Storage> {
         self.storage.read().unwrap()
     }
 
-    pub(crate) fn storage_mut(&self) -> std::sync::RwLockWriteGuard<'_, Storage> {
+    pub(crate) fn storage_mut(&self) -> std::cell::RefMut<'_, Storage> {
         self.storage.write().unwrap()
     }
 
@@ -2584,20 +2611,20 @@ impl Tensor {
     // make it unsafe.
     pub(crate) fn storage_mut_and_layout(
         &self,
-    ) -> (std::sync::RwLockWriteGuard<'_, Storage>, &Layout) {
+    ) -> (std::cell::RefMut<'_, Storage>, &Layout) {
         let storage = self.storage.write().unwrap();
         (storage, &self.layout)
     }
 
     /// The storage used by this tensor, together with the layout to use to access it safely.
-    pub fn storage_and_layout(&self) -> (std::sync::RwLockReadGuard<'_, Storage>, &Layout) {
+    pub fn storage_and_layout(&self) -> (std::cell::Ref<'_, Storage>, &Layout) {
         let storage = self.storage.read().unwrap();
         (storage, &self.layout)
     }
 
     pub(crate) fn same_storage(&self, rhs: &Self) -> bool {
-        let lhs: &RwLock<Storage> = self.storage.as_ref();
-        let rhs: &RwLock<Storage> = rhs.storage.as_ref();
+        let lhs: &RefCellWrap<Storage> = self.storage.as_ref();
+        let rhs: &RefCellWrap<Storage> = rhs.storage.as_ref();
         std::ptr::eq(lhs, rhs)
     }
 
@@ -2767,6 +2794,17 @@ impl Tensor {
             result = result.index_select(&indices_tensor, dim)?;
         }
         Ok(result)
+    }
+
+    pub fn split<D: Dim>(&self, splits: &[usize], dim: D) -> Result<Vec<Tensor>> {
+        let dim = dim.to_index(self.shape(), "split")?;
+        let mut split_res = Vec::new();
+        let mut index = 0;
+        for split in splits {
+            split_res.push(self.narrow(dim, index, *split)?);
+            index += *split;
+        }
+        Ok(split_res)
     }
 }
 

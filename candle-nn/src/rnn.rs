@@ -1,5 +1,6 @@
 //! Recurrent Neural Networks
-use candle::{DType, Device, IndexOp, Result, Tensor};
+
+use candle::{DType, Device, IndexOp, Module, Result, Tensor};
 
 /// Trait for Recurrent Neural Networks.
 #[allow(clippy::upper_case_acronyms)]
@@ -43,7 +44,34 @@ pub trait RNN {
     }
 
     /// Converts a sequence of state to a tensor.
-    fn states_to_tensor(&self, states: &[Self::State]) -> Result<Tensor>;
+    fn states_to_tensor<'a, I: IntoIterator<Item = &'a Self::State>>(&self, states: I) -> Result<Tensor>
+    where
+        I::IntoIter: ExactSizeIterator,
+        Self::State: 'a;
+}
+
+pub struct RNNModule<R: RNN> {
+    rnn: R,
+}
+
+impl<R: RNN> RNNModule<R> {
+    pub fn new(rnn: R) -> Self {
+        Self { rnn }
+    }
+}
+
+impl<R: RNN> Module for RNNModule<R> {
+    fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+        if xs.rank() == 2 {
+            let batch = xs.dim(0)?;
+            let state = self.rnn.zero_state(batch)?;
+            let state = self.rnn.step(xs, &state)?;
+            self.rnn.states_to_tensor(Some(&state))
+        } else {
+            let state = self.rnn.seq(xs)?;
+            self.rnn.states_to_tensor(state.last())
+        }
+    }
 }
 
 /// The state for a LSTM network, this contains two tensors.
@@ -70,14 +98,14 @@ impl LSTMState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum Direction {
     Forward,
     Backward,
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct LSTMConfig {
     pub w_ih_init: super::Init,
     pub w_hh_init: super::Init,
@@ -131,12 +159,7 @@ pub struct LSTM {
 
 impl LSTM {
     /// Creates a LSTM layer.
-    pub fn new(
-        in_dim: usize,
-        hidden_dim: usize,
-        config: LSTMConfig,
-        vb: crate::VarBuilder,
-    ) -> Result<Self> {
+    pub fn new(in_dim: usize, hidden_dim: usize, config: LSTMConfig, vb: crate::VarBuilder) -> Result<Self> {
         let layer_idx = config.layer_idx;
         let direction_str = match config.direction {
             Direction::Forward => "",
@@ -153,19 +176,15 @@ impl LSTM {
             config.w_hh_init,
         )?;
         let b_ih = match config.b_ih_init {
-            Some(init) => Some(vb.get_with_hints(
-                4 * hidden_dim,
-                &format!("bias_ih_l{layer_idx}{direction_str}"),
-                init,
-            )?),
+            Some(init) => {
+                Some(vb.get_with_hints(4 * hidden_dim, &format!("bias_ih_l{layer_idx}{direction_str}"), init)?)
+            }
             None => None,
         };
         let b_hh = match config.b_hh_init {
-            Some(init) => Some(vb.get_with_hints(
-                4 * hidden_dim,
-                &format!("bias_hh_l{layer_idx}{direction_str}"),
-                init,
-            )?),
+            Some(init) => {
+                Some(vb.get_with_hints(4 * hidden_dim, &format!("bias_hh_l{layer_idx}{direction_str}"), init)?)
+            }
             None => None,
         };
         Ok(Self {
@@ -186,12 +205,7 @@ impl LSTM {
 }
 
 /// Creates a LSTM layer.
-pub fn lstm(
-    in_dim: usize,
-    hidden_dim: usize,
-    config: LSTMConfig,
-    vb: crate::VarBuilder,
-) -> Result<LSTM> {
+pub fn lstm(in_dim: usize, hidden_dim: usize, config: LSTMConfig, vb: crate::VarBuilder) -> Result<LSTM> {
     LSTM::new(in_dim, hidden_dim, config, vb)
 }
 
@@ -199,8 +213,7 @@ impl RNN for LSTM {
     type State = LSTMState;
 
     fn zero_state(&self, batch_dim: usize) -> Result<Self::State> {
-        let zeros =
-            Tensor::zeros((batch_dim, self.hidden_dim), self.dtype, &self.device)?.contiguous()?;
+        let zeros = Tensor::zeros((batch_dim, self.hidden_dim), self.dtype, &self.device)?.contiguous()?;
         Ok(Self::State {
             h: zeros.clone(),
             c: zeros.clone(),
@@ -226,15 +239,39 @@ impl RNN for LSTM {
 
         let next_c = ((forget_gate * &in_state.c)? + (in_gate * cell_gate)?)?;
         let next_h = (out_gate * next_c.tanh()?)?;
-        Ok(LSTMState {
-            c: next_c,
-            h: next_h,
-        })
+        Ok(LSTMState { c: next_c, h: next_h })
     }
 
-    fn states_to_tensor(&self, states: &[Self::State]) -> Result<Tensor> {
-        let states = states.iter().map(|s| s.h.clone()).collect::<Vec<_>>();
+    fn states_to_tensor<'a, I: IntoIterator<Item = &'a Self::State>>(&self, states: I) -> Result<Tensor>
+    where
+        I::IntoIter: ExactSizeIterator,
+        Self::State: 'a,
+    {
+        let mut states = states.into_iter();
+        if states.len() == 1 {
+            return Ok(states.next().unwrap().h.clone());
+        }
+        let states = states.map(|s| s.h.clone()).collect::<Vec<_>>();
         Tensor::stack(&states, 1)
+    }
+}
+
+// -
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Copy)]
+pub struct LSTMInitializeConfig {
+    pub input_dim: usize,
+    pub hidden_dim: usize,
+    pub layer_idx: usize,
+    #[serde(flatten)]
+    pub config: LSTMConfig,
+}
+
+impl candle::tweaks::ParameterCount for LSTM {
+    fn parameter_count(&self) -> usize {
+        self.w_ih.parameter_count()
+            + self.w_hh.parameter_count()
+            + self.b_ih.as_ref().map_or(0, |b| b.parameter_count())
+            + self.b_hh.as_ref().map_or(0, |b| b.parameter_count())
     }
 }
 
@@ -253,7 +290,7 @@ impl GRUState {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct GRUConfig {
     pub w_ih_init: super::Init,
     pub w_hh_init: super::Init,
@@ -301,12 +338,7 @@ pub struct GRU {
 
 impl GRU {
     /// Creates a GRU layer.
-    pub fn new(
-        in_dim: usize,
-        hidden_dim: usize,
-        config: GRUConfig,
-        vb: crate::VarBuilder,
-    ) -> Result<Self> {
+    pub fn new(in_dim: usize, hidden_dim: usize, config: GRUConfig, vb: crate::VarBuilder) -> Result<Self> {
         let w_ih = vb.get_with_hints(
             (3 * hidden_dim, in_dim),
             "weight_ih_l0", // Only a single layer is supported.
@@ -342,12 +374,7 @@ impl GRU {
     }
 }
 
-pub fn gru(
-    in_dim: usize,
-    hidden_dim: usize,
-    config: GRUConfig,
-    vb: crate::VarBuilder,
-) -> Result<GRU> {
+pub fn gru(in_dim: usize, hidden_dim: usize, config: GRUConfig, vb: crate::VarBuilder) -> Result<GRU> {
     GRU::new(in_dim, hidden_dim, config, vb)
 }
 
@@ -355,8 +382,7 @@ impl RNN for GRU {
     type State = GRUState;
 
     fn zero_state(&self, batch_dim: usize) -> Result<Self::State> {
-        let h =
-            Tensor::zeros((batch_dim, self.hidden_dim), self.dtype, &self.device)?.contiguous()?;
+        let h = Tensor::zeros((batch_dim, self.hidden_dim), self.dtype, &self.device)?.contiguous()?;
         Ok(Self::State { h })
     }
 
@@ -381,8 +407,34 @@ impl RNN for GRU {
         Ok(GRUState { h: next_h })
     }
 
-    fn states_to_tensor(&self, states: &[Self::State]) -> Result<Tensor> {
-        let states = states.iter().map(|s| s.h.clone()).collect::<Vec<_>>();
+    fn states_to_tensor<'a, I: IntoIterator<Item = &'a Self::State>>(&self, states: I) -> Result<Tensor>
+    where
+        I::IntoIter: ExactSizeIterator,
+        Self::State: 'a,
+    {
+        let mut states = states.into_iter();
+        if states.len() == 1 {
+            return Ok(states.next().unwrap().h.clone());
+        }
+        let states = states.map(|s| s.h.clone()).collect::<Vec<_>>();
         Tensor::cat(&states, 1)
+    }
+}
+
+// -
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Copy)]
+pub struct GRUInitializeConfig {
+    pub input_dim: usize,
+    pub hidden_dim: usize,
+    #[serde(flatten)]
+    pub config: GRUConfig,
+}
+
+impl candle::tweaks::ParameterCount for GRU {
+    fn parameter_count(&self) -> usize {
+        self.w_hh.parameter_count()
+            + self.w_ih.parameter_count()
+            + self.b_hh.as_ref().map_or(0, |b| b.parameter_count())
+            + self.b_ih.as_ref().map_or(0, |b| b.parameter_count())
     }
 }

@@ -1,8 +1,11 @@
 //! Tensor ops.
 //!
 
-use candle::{CpuStorage, DType, Layout, Module, Result, Shape, Tensor, D};
+use std::borrow::Cow;
+use candle::{CpuStorage, DType, Error, Layout, Module, Result, Shape, Tensor, D};
 use rayon::prelude::*;
+use candle::tweaks::flags::is_training;
+use crate::VarBuilder;
 
 /// Applies the softmax function to the input tensor, rescaling the element so that elements on
 /// a slice of fixed index on dimension `dim` are between 0 and 1 and sum to 1.
@@ -303,6 +306,18 @@ impl candle::ModuleT for Dropout {
     }
 }
 
+impl crate::tweaks::SerializableModule for Dropout {
+    type Config = f32;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, _: VarBuilder) -> std::result::Result<Self, Error> {
+        Ok(Self::new(config))
+    }
+
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Owned(self.drop_p)
+    }
+}
+
 struct SoftmaxLastDim;
 
 impl candle::CustomOp1 for SoftmaxLastDim {
@@ -452,6 +467,15 @@ impl candle::CustomOp1 for SoftmaxLastDim {
 
 pub fn softmax_last_dim(xs: &Tensor) -> Result<Tensor> {
     xs.apply_op1_no_bwd(&SoftmaxLastDim)
+}
+
+/// Softmax last dim and automatic detect if training and swap to use backward compatible method.
+pub fn softmax_last_dim_auto(xs: &Tensor) -> Result<Tensor> {
+    if is_training() {
+        softmax(xs, D::Minus1)
+    } else {
+        xs.apply_op1_no_bwd(&SoftmaxLastDim)
+    }
 }
 
 #[derive(Debug, Clone)]

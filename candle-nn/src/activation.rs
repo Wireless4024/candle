@@ -1,6 +1,8 @@
 //! Activation Functions
 //!
 use candle::{Result, Tensor};
+use std::borrow::Cow;
+use crate::VarBuilder;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -106,4 +108,16 @@ pub fn prelu(num_channels: Option<usize>, vs: crate::VarBuilder) -> Result<PReLU
     // When using a scalar weight, the PyTorch encoding is to use a 1d vector of length 1.
     let ws = vs.get_with_hints((num_channels.unwrap_or(1),), "weight", init_ws)?;
     Ok(PReLU::new(ws, num_channels.is_none()))
+}
+
+// --
+impl crate::tweaks::SerializableModule for Activation {
+    type Config = Activation;
+
+    fn load(config: Self::Config, _: &crate::tweaks::ModuleRegistry, _: VarBuilder) -> std::result::Result<Self, candle::Error> {
+        Ok(config)
+    }
+    fn config(&self) -> Cow<'_, Self::Config> {
+        Cow::Borrowed(self)
+    }
 }
