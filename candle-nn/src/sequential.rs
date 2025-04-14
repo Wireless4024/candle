@@ -1,11 +1,19 @@
 //! Sequential Layer
 //!
 //! A sequential layer used to chain multiple layers and closures.
+
+use std::fmt::Debug;
 use candle::{Module, Result, Tensor};
 
 /// A sequential layer combining multiple other layers.
 pub struct Sequential {
     layers: Vec<Box<dyn Module>>,
+}
+
+impl Debug for Sequential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Sequential")
+    }
 }
 
 /// Creates a new empty sequential layer.

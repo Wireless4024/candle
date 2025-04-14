@@ -1,3 +1,6 @@
+#![feature(likely_unlikely)]
+#![feature(ptr_as_ref_unchecked)]
+#![feature(stdarch_x86_avx512_f16)]
 //! ML framework for Rust
 //!
 //! ```rust
@@ -86,6 +89,7 @@ mod tensor_cat;
 pub mod test_utils;
 pub mod utils;
 mod variable;
+pub mod tweaks;
 
 #[cfg(feature = "cudnn")]
 pub use cuda_backend::cudnn;
