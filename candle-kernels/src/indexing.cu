@@ -21,6 +21,12 @@ constexpr uint32_t max_value<uint32_t>() {
 
 template <>
 __host__ __device__
+constexpr uint16_t max_value<uint16_t>() {
+    return 0xFFFFu;
+}
+
+template <>
+__host__ __device__
 constexpr uint8_t max_value<uint8_t>() {
     return 0xFFu;
 }
@@ -260,89 +266,139 @@ S_OP(__half, uint8_t, s_u8_f16)
 IS_OP(float, int64_t, is_i64_f32)
 IS_OP(double, int64_t, is_i64_f64)
 IS_OP(uint8_t, int64_t, is_i64_u8)
+IS_OP(uint16_t, int64_t, is_i64_u16)
 IS_OP(uint32_t, int64_t, is_i64_u32)
 IS_OP(int64_t, int64_t, is_i64_i64)
 
 IS_OP(float, uint32_t, is_u32_f32)
 IS_OP(double, uint32_t, is_u32_f64)
 IS_OP(uint8_t, uint32_t, is_u32_u8)
+IS_OP(uint16_t, uint32_t, is_u32_u16)
 IS_OP(int64_t, uint32_t, is_u32_i64)
 IS_OP(uint32_t, uint32_t, is_u32_u32)
+
+IS_OP(float, uint16_t, is_u16_f32)
+IS_OP(double, uint16_t, is_u16_f64)
+IS_OP(uint8_t, uint16_t, is_u16_u8)
+IS_OP(uint16_t, uint16_t, is_u16_u16)
+IS_OP(int64_t, uint16_t, is_u16_i64)
+IS_OP(uint32_t, uint16_t, is_u16_u32)
 
 IS_OP(float, uint8_t, is_u8_f32)
 IS_OP(double, uint8_t, is_u8_f64)
 IS_OP(uint8_t, uint8_t, is_u8_u8)
+IS_OP(uint16_t, uint8_t, is_u8_u16)
 IS_OP(uint32_t, uint8_t, is_u8_u32)
 IS_OP(int64_t, uint8_t, is_u8_i64)
 
 GATHER_OP(float, int64_t, gather_i64_f32)
 GATHER_OP(double, int64_t, gather_i64_f64)
 GATHER_OP(uint8_t, int64_t, gather_i64_u8)
+GATHER_OP(uint16_t, int64_t, gather_i64_u16)
 GATHER_OP(uint32_t, int64_t, gather_i64_u32)
 GATHER_OP(int64_t, int64_t, gather_i64_i64)
 
 GATHER_OP(float, uint32_t, gather_u32_f32)
 GATHER_OP(double, uint32_t, gather_u32_f64)
 GATHER_OP(uint8_t, uint32_t, gather_u32_u8)
+GATHER_OP(uint16_t, uint32_t, gather_u32_u16)
 GATHER_OP(int64_t, uint32_t, gather_u32_i64)
 GATHER_OP(uint32_t, uint32_t, gather_u32_u32)
+
+GATHER_OP(float, uint16_t, gather_u16_f32)
+GATHER_OP(double, uint16_t, gather_u16_f64)
+GATHER_OP(uint8_t, uint16_t, gather_u16_u8)
+GATHER_OP(uint16_t, uint16_t, gather_u16_u16)
+GATHER_OP(int64_t, uint16_t, gather_u16_i64)
+GATHER_OP(uint32_t, uint16_t, gather_u16_u32)
 
 GATHER_OP(float, uint8_t, gather_u8_f32)
 GATHER_OP(double, uint8_t, gather_u8_f64)
 GATHER_OP(uint8_t, uint8_t, gather_u8_u8)
+GATHER_OP(uint16_t, uint8_t, gather_u8_u16)
 GATHER_OP(uint32_t, uint8_t, gather_u8_u32)
 GATHER_OP(int64_t, uint8_t, gather_u8_i64)
 
 IA_OP(float, int64_t, ia_i64_f32)
 IA_OP(double, int64_t, ia_i64_f64)
 IA_OP(uint8_t, int64_t, ia_i64_u8)
-IA_OP(int64_t, int64_t, ia_i64_i64)
+IA_OP(uint16_t, int64_t, ia_i64_u16)
 IA_OP(uint32_t, int64_t, ia_i64_u32)
+IA_OP(int64_t, int64_t, ia_i64_i64)
 
 IA_OP(float, uint32_t, ia_u32_f32)
 IA_OP(double, uint32_t, ia_u32_f64)
 IA_OP(uint8_t, uint32_t, ia_u32_u8)
-IA_OP(int64_t, uint32_t, ia_u32_i64)
+IA_OP(uint16_t, uint32_t, ia_u32_u16)
 IA_OP(uint32_t, uint32_t, ia_u32_u32)
+IA_OP(int64_t, uint32_t, ia_u32_i64)
+
+IA_OP(float, uint16_t, ia_u16_f32)
+IA_OP(double, uint16_t, ia_u16_f64)
+IA_OP(uint8_t, uint16_t, ia_u16_u8)
+IA_OP(uint16_t, uint16_t, ia_u16_u16)
+IA_OP(uint32_t, uint16_t, ia_u16_u32)
+IA_OP(int64_t, uint16_t, ia_u16_i64)
 
 IA_OP(float, uint8_t, ia_u8_f32)
 IA_OP(double, uint8_t, ia_u8_f64)
 IA_OP(uint8_t, uint8_t, ia_u8_u8)
+IA_OP(uint16_t, uint8_t, ia_u8_u16)
 IA_OP(uint32_t, uint8_t, ia_u8_u32)
 IA_OP(int64_t, uint8_t, ia_u8_i64)
 
 SA_OP(float, int64_t, sa_i64_f32)
 SA_OP(double, int64_t, sa_i64_f64)
 SA_OP(uint8_t, int64_t, sa_i64_u8)
-SA_OP(int64_t, int64_t, sa_i64_i64)
+SA_OP(uint16_t, int64_t, sa_i64_u16)
 SA_OP(uint32_t, int64_t, sa_i64_u32)
+SA_OP(int64_t, int64_t, sa_i64_i64)
 
 SA_OP(float, uint32_t, sa_u32_f32)
 SA_OP(double, uint32_t, sa_u32_f64)
 SA_OP(uint8_t, uint32_t, sa_u32_u8)
-SA_OP(int64_t, uint32_t, sa_u32_i64)
+SA_OP(uint16_t, uint32_t, sa_u32_u16)
 SA_OP(uint32_t, uint32_t, sa_u32_u32)
+SA_OP(int64_t, uint32_t, sa_u32_i64)
+
+SA_OP(float, uint16_t, sa_u16_f32)
+SA_OP(double, uint16_t, sa_u16_f64)
+SA_OP(uint8_t, uint16_t, sa_u16_u8)
+SA_OP(uint16_t, uint16_t, sa_u16_u16)
+SA_OP(uint32_t, uint16_t, sa_u16_u32)
+SA_OP(int64_t, uint16_t, sa_u16_i64)
 
 SA_OP(float, uint8_t, sa_u8_f32)
 SA_OP(double, uint8_t, sa_u8_f64)
 SA_OP(uint8_t, uint8_t, sa_u8_u8)
+SA_OP(uint16_t, uint8_t, sa_u8_u16)
 SA_OP(uint32_t, uint8_t, sa_u8_u32)
 SA_OP(int64_t, uint8_t, sa_u8_i64)
 
 S_OP(float, int64_t, s_i64_f32)
 S_OP(double, int64_t, s_i64_f64)
 S_OP(uint8_t, int64_t, s_i64_u8)
-S_OP(int64_t, int64_t, s_i64_i64)
+S_OP(uint16_t, int64_t, s_i64_u16)
 S_OP(uint32_t, int64_t, s_i64_u32)
+S_OP(int64_t, int64_t, s_i64_i64)
 
 S_OP(float, uint32_t, s_u32_f32)
 S_OP(double, uint32_t, s_u32_f64)
 S_OP(uint8_t, uint32_t, s_u32_u8)
-S_OP(int64_t, uint32_t, s_u32_i64)
+S_OP(uint16_t, uint32_t, s_u32_u16)
 S_OP(uint32_t, uint32_t, s_u32_u32)
+S_OP(int64_t, uint32_t, s_u32_i64)
+
+S_OP(float, uint16_t, s_u16_f32)
+S_OP(double, uint16_t, s_u16_f64)
+S_OP(uint8_t, uint16_t, s_u16_u8)
+S_OP(uint16_t, uint16_t, s_u16_u16)
+S_OP(uint32_t, uint16_t, s_u16_u32)
+S_OP(int64_t, uint16_t, s_u16_i64)
 
 S_OP(float, uint8_t, s_u8_f32)
 S_OP(double, uint8_t, s_u8_f64)
 S_OP(uint8_t, uint8_t, s_u8_u8)
+S_OP(uint16_t, uint8_t, s_u8_u16)
 S_OP(uint32_t, uint8_t, s_u8_u32)
 S_OP(int64_t, uint8_t, s_u8_i64)
